@@ -145,9 +145,44 @@ export class Partition extends EventEmitter {
     const selector = `${this.Id}`
     if (this.Id < 10) return [selector]
 
-    // Some panels accept only plain numeric selectors for 2-digit partitions.
-    const preferPlain = (this.riscoComm.panelInfo?.MaxParts ?? 0) > 9
-    return preferPlain ? [selector, `*${selector}`] : [`*${selector}`, selector]
+    // For 2-digit partitions, try the unambiguous selector first, then fallback.
+    return [`*${selector}`, selector]
+  }
+
+  private async refreshStatus(): Promise<void> {
+    assertIsDefined(this.riscoComm.tcpSocket, 'RiscoComm.tcpSocket', 'TCP is not initialized')
+    try {
+      const status = await this.riscoComm.tcpSocket.getResult(`PSTT${this.Id}?`)
+      this.Status = status
+    } catch (err) {
+      logger.log('warn', `Failed to refresh partition ${this.Id} status: ${err}`)
+    }
+  }
+
+  private expectedStateFor(command: string): (() => boolean) | null {
+    switch (command) {
+      case 'ARM':
+        return () => this.Arm && !this.HomeStay
+      case 'STAY':
+        return () => this.HomeStay
+      case 'DISARM':
+        return () => !this.Arm && !this.HomeStay
+      default:
+        return null
+    }
+  }
+
+  private async waitForExpectedState(command: string, timeoutMs = 4000, intervalMs = 400): Promise<boolean> {
+    const expected = this.expectedStateFor(command)
+    if (!expected) return true
+
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      await this.refreshStatus()
+      if (expected()) return true
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+    return expected()
   }
 
   private async sendPartitionCommand(command: string): Promise<boolean> {
@@ -161,7 +196,13 @@ export class Partition extends EventEmitter {
       try {
         const response = await tcpSocket.sendCommand(`${command}=${selector}`)
         if (response === 'ACK') {
-          return true
+          const ok = await this.waitForExpectedState(command)
+          if (ok) return true
+          if (!isLast) {
+            logger.log('warn', `Command ${command} ACK for partition ${this.Id} with selector '${selector}', but status did not change. Trying fallback.`)
+            continue
+          }
+          return false
         }
         const error = tcpSocket.getErrorCode(response)
         if (!isLast && error?.[0] === 'N05') {
@@ -170,9 +211,13 @@ export class Partition extends EventEmitter {
         }
         return false
       } catch (err) {
-        if (!isLast && err instanceof RiscoCommandError) {
-          logger.log('warn', `Command ${command} timeout for partition ${this.Id} with selector '${selector}'. Trying fallback.`)
-          continue
+        if (err instanceof RiscoCommandError) {
+          const ok = await this.waitForExpectedState(command)
+          if (ok) return true
+          if (!isLast) {
+            logger.log('warn', `Command ${command} timeout for partition ${this.Id} with selector '${selector}'. Trying fallback.`)
+            continue
+          }
         }
         throw err
       }
