@@ -43,6 +43,16 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12h
 const sessions = new Map<string, Session>();
 
 const allowedLogLevels = ['error', 'warn', 'info', 'verbose', 'debug'];
+const allowedPartitionCommandModes = ['fixed', 'probe'];
+const allowedPartitionCommandStrategies = [
+  'equals_star_decimal',
+  'colon_decimal',
+  'colon_zero_pad_3',
+  'equals_zero_pad_3',
+  'equals_hex',
+  'equals_hex_zero_pad_2',
+  'equals_plain',
+];
 
 const parseCookies = (cookieHeader?: string) => {
   const list: Record<string, string> = {};
@@ -161,6 +171,25 @@ const writeConfig = async (config: any) => {
 };
 
 const sanitizeLogLevel = (lvl: any) => (allowedLogLevels.includes(lvl) ? lvl : undefined);
+const sanitizePartitionCommandMode = (mode: any) => (
+  allowedPartitionCommandModes.includes(mode) ? mode : undefined
+);
+const sanitizePartitionCommandStrategy = (strategy: any) => (
+  allowedPartitionCommandStrategies.includes(strategy) ? strategy : undefined
+);
+const sanitizePartitionCommandProbeOrder = (value: any) => {
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+  const parsed = rawValues
+    .map((item) => String(item || '').trim())
+    .filter((item, index, arr) => (
+      !!sanitizePartitionCommandStrategy(item) && arr.indexOf(item) === index
+    ));
+  return parsed.length > 0 ? parsed : undefined;
+};
 
 const toPort = (val: any) => {
   const num = Number(val);
@@ -188,6 +217,18 @@ const applyConfigUpdate = (current: any, next: any) => {
   if (next.panel?.panelPassword || next.panelPassword) updated.panel.panelPassword = next.panel?.panelPassword ?? next.panelPassword;
   if (next.panel?.panelId || next.panelId) updated.panel.panelId = next.panel?.panelId ?? next.panelId;
   if (next.panel?.socketMode) updated.panel.socketMode = next.panel.socketMode;
+  if (next.panel?.partitionCommandMode !== undefined) {
+    const mode = sanitizePartitionCommandMode(next.panel.partitionCommandMode);
+    if (mode) updated.panel.partitionCommandMode = mode;
+  }
+  if (next.panel?.partitionCommandStrategy !== undefined) {
+    const strategy = sanitizePartitionCommandStrategy(next.panel.partitionCommandStrategy);
+    if (strategy) updated.panel.partitionCommandStrategy = strategy;
+  }
+  if (next.panel?.partitionCommandProbeOrder !== undefined) {
+    const probeOrder = sanitizePartitionCommandProbeOrder(next.panel.partitionCommandProbeOrder);
+    if (probeOrder) updated.panel.partitionCommandProbeOrder = probeOrder;
+  }
 
   if (next.web?.http_port !== undefined) {
     const port = toPort(next.web.http_port);

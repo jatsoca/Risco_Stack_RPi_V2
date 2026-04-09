@@ -12,6 +12,10 @@ import { TypedEmitter } from 'tiny-typed-emitter';
 import { RiscoProxyTCPSocket } from './RiscoProxySocket';
 import fs, { WriteStream } from 'fs';
 import { RiscoCommandError } from './RiscoError';
+import {
+  normalizePartitionCommandConfig,
+  PartitionCommandConfig,
+} from './PartitionCommandConfig';
 
 export class PanelInfo {
   public PanelType!: string;
@@ -43,6 +47,7 @@ export class RiscoComm extends TypedEmitter<RiscoCommEvents> {
   private readonly GMT_TZ: string;
 
   private readonly socketOptions: SocketOptions;
+  private readonly partitionCommandConfig: PartitionCommandConfig;
 
   panelInfo: PanelInfo | undefined;
 
@@ -78,6 +83,17 @@ export class RiscoComm extends TypedEmitter<RiscoCommEvents> {
       cloudPort: options.cloudPort || 33000,
       panelConnectionDelay: options.panelConnectionDelay || 30000,
     };
+    this.partitionCommandConfig = normalizePartitionCommandConfig(options);
+    logger.log(
+      'info',
+      `Partition command mode=${this.partitionCommandConfig.mode}, strategy=${this.partitionCommandConfig.strategy}, probeOrder=${this.partitionCommandConfig.probeOrder.join(',')}`,
+    );
+    if (this.partitionCommandConfig.probeOrder.includes('equals_plain')) {
+      logger.log(
+        'warn',
+        `Partition command probe order includes 'equals_plain'. For partitions 10+, this variant can be ambiguous on some panels.`,
+      );
+    }
 
     if (options.commandsLog) {
       const commandsFileName = `risco-commands-${new Date().toISOString()}.csv`;
@@ -92,6 +108,10 @@ export class RiscoComm extends TypedEmitter<RiscoCommEvents> {
     this.ntpPort = options.ntpPort || 123;
     this.watchDogInterval = options.watchDogInterval || 5000;
     this.GMT_TZ = RiscoComm.getGmtTimeZone();
+  }
+
+  getPartitionCommandConfig(): PartitionCommandConfig {
+    return this.partitionCommandConfig;
   }
 
   private static getGmtTimeZone(): string {

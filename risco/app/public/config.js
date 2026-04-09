@@ -27,6 +27,11 @@ const fillConfig = (cfg) => {
   const maskedPanelPass = cfg.panel?.panelPassword === '***' ? '' : (cfg.panel?.panelPassword || '');
   document.getElementById('panelPassword').value = maskedPanelPass;
   document.getElementById('panelId').value = cfg.panel?.panelId || '';
+  document.getElementById('partitionCommandMode').value = cfg.panel?.partitionCommandMode || 'fixed';
+  document.getElementById('partitionCommandStrategy').value = cfg.panel?.partitionCommandStrategy || 'equals_star_decimal';
+  document.getElementById('partitionCommandProbeOrder').value = Array.isArray(cfg.panel?.partitionCommandProbeOrder)
+    ? cfg.panel.partitionCommandProbeOrder.join(',')
+    : (cfg.panel?.partitionCommandProbeOrder || 'equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,equals_plain');
   document.getElementById('webPort').value = cfg.web?.http_port || '';
   document.getElementById('wsPath').value = cfg.web?.ws_path || '';
   document.getElementById('modbusHost').value = cfg.modbus?.host || '';
@@ -56,6 +61,12 @@ const gatherConfig = () => ({
     panelPort: Number(document.getElementById('panelPort').value),
     panelPassword: document.getElementById('panelPassword').value,
     panelId: document.getElementById('panelId').value,
+    partitionCommandMode: document.getElementById('partitionCommandMode').value,
+    partitionCommandStrategy: document.getElementById('partitionCommandStrategy').value,
+    partitionCommandProbeOrder: document.getElementById('partitionCommandProbeOrder').value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
   },
   web: {
     http_port: Number(document.getElementById('webPort').value),

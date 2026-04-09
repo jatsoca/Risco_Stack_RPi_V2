@@ -32,6 +32,15 @@ import { EventEmitter } from 'events'
 import { logger } from '../Logger'
 import { assertIsDefined } from '../Assertions'
 import { RiscoCommandError } from '../RiscoError'
+import {
+  DEFAULT_PARTITION_COMMAND_STRATEGY,
+  PartitionCommandStrategy,
+} from '../PartitionCommandConfig'
+
+interface PartitionCommandAttempt {
+  strategy: PartitionCommandStrategy
+  rawCommand: string
+}
 
 export class Partition extends EventEmitter {
   Id: number
@@ -141,12 +150,43 @@ export class Partition extends EventEmitter {
     }
   }
 
-  private partitionSelectors(): string[] {
-    const selector = `${this.Id}`
-    if (this.Id < 10) return [selector]
+  private buildPartitionCommand(command: string, strategy: PartitionCommandStrategy): string {
+    const decimal = `${this.Id}`
+    const decimalPadded2 = decimal.padStart(2, '0')
+    const decimalPadded3 = decimal.padStart(3, '0')
+    const hex = this.Id.toString(16).toUpperCase()
+    const hexPadded2 = hex.padStart(2, '0')
 
-    // For 2-digit partitions, try the unambiguous selector first, then fallback.
-    return [`*${selector}`, selector]
+    switch (strategy) {
+      case 'equals_star_decimal':
+        return `${command}=*${decimal}`
+      case 'colon_decimal':
+        return `${command}:${decimal}`
+      case 'colon_zero_pad_3':
+        return `${command}:${decimalPadded3}`
+      case 'equals_zero_pad_3':
+        return `${command}=${decimalPadded3}`
+      case 'equals_hex':
+        return `${command}=${hex}`
+      case 'equals_hex_zero_pad_2':
+        return `${command}=${hexPadded2}`
+      case 'equals_plain':
+      default:
+        return `${command}=${decimal}`
+    }
+  }
+
+  private getPartitionCommandAttempts(command: string): PartitionCommandAttempt[] {
+    const config = this.riscoComm.getPartitionCommandConfig()
+    const strategies = (this.Id >= 10 && config.mode === 'probe')
+      ? config.probeOrder
+      : [config.strategy || DEFAULT_PARTITION_COMMAND_STRATEGY]
+
+    const uniqueStrategies = [...new Set(strategies)]
+    return uniqueStrategies.map(strategy => ({
+      strategy,
+      rawCommand: this.buildPartitionCommand(command, strategy),
+    }))
   }
 
   private async refreshStatus(): Promise<void> {
@@ -188,25 +228,29 @@ export class Partition extends EventEmitter {
   private async sendPartitionCommand(command: string): Promise<boolean> {
     assertIsDefined(this.riscoComm.tcpSocket, 'RiscoComm.tcpSocket', 'TCP is not initialized')
     const tcpSocket = this.riscoComm.tcpSocket
-    const selectors = this.partitionSelectors()
+    const attempts = this.getPartitionCommandAttempts(command)
 
-    for (let i = 0; i < selectors.length; i++) {
-      const selector = selectors[i]
-      const isLast = i === selectors.length - 1
+    for (let i = 0; i < attempts.length; i++) {
+      const attempt = attempts[i]
+      const isLast = i === attempts.length - 1
       try {
-        const response = await tcpSocket.sendCommand(`${command}=${selector}`)
+        logger.log(
+          'info',
+          `Partition ${this.Id} trying ${command} with strategy '${attempt.strategy}' (${i + 1}/${attempts.length}): ${attempt.rawCommand}`,
+        )
+        const response = await tcpSocket.sendCommand(attempt.rawCommand)
         if (response === 'ACK') {
           const ok = await this.waitForExpectedState(command)
           if (ok) return true
           if (!isLast) {
-            logger.log('warn', `Command ${command} ACK for partition ${this.Id} with selector '${selector}', but status did not change. Trying fallback.`)
+            logger.log('warn', `Command ${command} ACK for partition ${this.Id} with strategy '${attempt.strategy}', but target partition state did not change. Trying next strategy.`)
             continue
           }
           return false
         }
         const error = tcpSocket.getErrorCode(response)
         if (!isLast && error?.[0] === 'N05') {
-          logger.log('warn', `Command ${command} rejected for partition ${this.Id} with selector '${selector}' (N05). Trying fallback.`)
+          logger.log('warn', `Command ${command} rejected for partition ${this.Id} with strategy '${attempt.strategy}' (N05). Trying next strategy.`)
           continue
         }
         return false
@@ -215,7 +259,7 @@ export class Partition extends EventEmitter {
           const ok = await this.waitForExpectedState(command)
           if (ok) return true
           if (!isLast) {
-            logger.log('warn', `Command ${command} timeout for partition ${this.Id} with selector '${selector}'. Trying fallback.`)
+            logger.log('warn', `Command ${command} timeout for partition ${this.Id} with strategy '${attempt.strategy}'. Trying next strategy.`)
             continue
           }
         }

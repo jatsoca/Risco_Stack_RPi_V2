@@ -42,7 +42,31 @@
             <label for="panelId">Panel ID</label>
             <input id="panelId" name="panelId" required>
           </div>
+          <div class="field">
+            <label for="partitionCommandMode">Modo comando partici&oacute;n</label>
+            <select id="partitionCommandMode" name="partitionCommandMode">
+              <option value="fixed">fixed</option>
+              <option value="probe">probe</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="partitionCommandStrategy">Estrategia fija</label>
+            <select id="partitionCommandStrategy" name="partitionCommandStrategy">
+              <option value="equals_star_decimal">equals_star_decimal</option>
+              <option value="colon_decimal">colon_decimal</option>
+              <option value="colon_zero_pad_3">colon_zero_pad_3</option>
+              <option value="equals_zero_pad_3">equals_zero_pad_3</option>
+              <option value="equals_hex">equals_hex</option>
+              <option value="equals_hex_zero_pad_2">equals_hex_zero_pad_2</option>
+              <option value="equals_plain">equals_plain</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="partitionCommandProbeOrder">Orden probe</label>
+            <input id="partitionCommandProbeOrder" name="partitionCommandProbeOrder" placeholder="equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,equals_plain">
+          </div>
         </div>
+        <p class="muted">Para particiones de dos d&iacute;gitos puedes fijar una sola estrategia o probar varias. `equals_plain` queda al final porque es la forma m&aacute;s ambigua.</p>
 
         <h3>Servicios</h3>
         <div class="form-grid">

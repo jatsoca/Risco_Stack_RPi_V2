@@ -6,8 +6,9 @@ import { PartitionList } from './Devices/Partitions';
 import { MBSystem } from './Devices/System';
 import { EventEmitter } from 'events';
 import { SocketMode } from './RiscoBaseSocket';
+import { PartitionCommandOptions } from './PartitionCommandConfig';
 
-export interface PanelOptions {
+export interface PanelOptions extends PartitionCommandOptions {
   panelIp?: string
   panelPort?: number
   panelPassword?: string,

@@ -20,7 +20,17 @@
     "panelId": "0001",
     "socketMode": "direct",
     "watchDogInterval": 5000,
-    "commandsLog": true
+    "commandsLog": true,
+    "partitionCommandMode": "probe",
+    "partitionCommandStrategy": "equals_star_decimal",
+    "partitionCommandProbeOrder": [
+      "equals_star_decimal",
+      "colon_decimal",
+      "colon_zero_pad_3",
+      "equals_zero_pad_3",
+      "equals_hex_zero_pad_2",
+      "equals_plain"
+    ]
   },
   "zones": {
     "default": {
