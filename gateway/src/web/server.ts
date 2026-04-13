@@ -10,7 +10,7 @@ import { promises as fsp } from 'fs';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { spawn } from 'child_process';
-import { ensureRuntimeDirectories, getRuntimePaths } from '../lib/runtime';
+import { ensureRuntimeDirectories, getPlatformInfo, getRuntimePaths } from '../lib/runtime';
 
 type PartitionState = { id: number; status: string; ready?: boolean };
 type ZoneState = { id: number; open: boolean; bypass: boolean; label: string };
@@ -82,6 +82,10 @@ const setSessionCookie = (res: express.Response, token: string) => {
 
 const clearSessionCookie = (res: express.Response) => {
   res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`);
+};
+
+const setNoCacheHeaders = (res: express.Response) => {
+  res.setHeader('Cache-Control', 'no-store');
 };
 
 const validateSession = (token?: string) => {
@@ -281,7 +285,7 @@ export function startWebServer(
 
   app.use(express.json());
   app.use((_req, res, next) => {
-    res.setHeader('Cache-Control', 'no-store');
+    setNoCacheHeaders(res);
     next();
   });
 
@@ -289,7 +293,10 @@ export function startWebServer(
   console.log(`[WEB] Static dir: ${publicDir}`);
 
   // Health (sin auth, usado por healthcheck)
-  app.get('/health', (_req, res) => res.json({ ok: true }));
+  app.get('/health', (_req, res) => res.json({ ok: true, uptimeSeconds: Math.round(process.uptime()) }));
+  app.get('/api/system/info', requireAuthJson, (_req, res) => {
+    res.json({ ok: true, info: getPlatformInfo() });
+  });
 
   // Auth
   app.post('/api/auth/login', async (req, res) => {
@@ -371,7 +378,8 @@ export function startWebServer(
     const payload = await defaultUsersContent();
     await fsp.writeFile(USERS_FILE, JSON.stringify(payload, null, 2));
     sessions.clear();
-    res.json({ ok: true, needsRestart: true });
+    res.json({ ok: true, needsRestart: true, restarting: true });
+    setTimeout(() => process.exit(0), 500);
   });
 
   // Cambiar IP del host (Raspberry). Requiere script externo con sudo.

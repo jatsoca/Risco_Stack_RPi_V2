@@ -26,7 +26,12 @@
   </header>
 
   <div class="info-bar">
-    <div class="info-card">
+    <div class="info-grid">
+      <div class="info-card">
+        <h3>Estado del Gateway</h3>
+        <p id="gateway-meta" class="muted">Cargando diagnostico...</p>
+      </div>
+      <div class="info-card">
       <h3>Modbus TCP</h3>
       <p>Holding registers (read-only):</p>
       <ul>
@@ -34,6 +39,7 @@
         <li>Zonas regs 33-544 (uint16). 0=cerrada, 1=abierta, 2=bypass.</li>
         <li>Discrete inputs: bits 0-31 alarmada (1), bits 32-543 zona abierta (1).</li>
       </ul>
+      </div>
     </div>
   </div>
 

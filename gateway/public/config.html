@@ -23,6 +23,12 @@
 
   <div class="page">
     <div class="card">
+      <h2>Runtime</h2>
+      <p class="muted" id="platform-msg">Cargando informaci&oacute;n del runtime...</p>
+      <p class="muted" id="service-msg"></p>
+    </div>
+
+    <div class="card">
       <h2>Panel RISCO</h2>
       <form id="config-form">
         <div class="form-grid">
@@ -36,7 +42,7 @@
           </div>
           <div class="field">
             <label for="panelPassword">Contrase&ntilde;a panel</label>
-            <input id="panelPassword" name="panelPassword" type="password" required>
+            <input id="panelPassword" name="panelPassword" type="password" placeholder="Dejar en blanco para conservar">
           </div>
           <div class="field">
             <label for="panelId">Panel ID</label>

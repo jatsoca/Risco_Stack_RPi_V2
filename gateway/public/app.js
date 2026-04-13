@@ -8,15 +8,33 @@ const partitionInput = document.getElementById('partition-id');
 const armButtons = document.querySelectorAll('.arm-btn');
 const toastContainer = document.getElementById('toast-container');
 const logoutBtn = document.getElementById('logout-btn');
+const gatewayMeta = document.getElementById('gateway-meta');
 
 let snapshot = { partitions: [], zones: [] };
 let ws;
 let panelOnline = false;
+let reconnectTimer = null;
+let reconnectDelayMs = 1500;
 
 function setBadge(el, text, cls) {
   if (!el) return;
   el.textContent = text;
   el.className = `badge ${cls}`;
+}
+
+function isWsReady() {
+  return !!ws && ws.readyState === WebSocket.OPEN;
+}
+
+function updateControlsState() {
+  const ready = isWsReady() && panelOnline;
+  armButtons.forEach((btn) => {
+    btn.disabled = !ready;
+  });
+  const zoneButtons = document.querySelectorAll('.zone-bypass-btn');
+  zoneButtons.forEach((btn) => {
+    btn.disabled = !ready;
+  });
 }
 
 function handleUnauthorized(status) {
@@ -45,18 +63,49 @@ async function loadSnapshot() {
   }
 }
 
+async function loadSystemInfo() {
+  try {
+    const res = await fetch('/api/system/info');
+    if (res.status === 401) {
+      handleUnauthorized(res.status);
+      return;
+    }
+    if (!res.ok) throw new Error('system info failed');
+    const data = await res.json();
+    const info = data.info || {};
+    if (gatewayMeta) {
+      const hostIpState = info.hostIpSupported ? 'IP host: disponible' : 'IP host: no disponible';
+      gatewayMeta.textContent = `Version ${info.appVersion || '?'} | Node ${info.nodeVersion || '?'} | ${hostIpState} | Uptime ${info.uptimeSeconds || 0}s`;
+    }
+  } catch (e) {
+    console.error('[UI] Error loading system info', e);
+    if (gatewayMeta) gatewayMeta.textContent = 'No se pudo cargar el diagnostico del gateway';
+  }
+}
+
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${proto}//${location.host}${window.WS_PATH || '/ws'}`;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   ws = new WebSocket(wsUrl);
-  ws.onopen = () => setBadge(wsStatusEl, 'WS conectado', 'badge ok');
+  ws.onopen = () => {
+    reconnectDelayMs = 1500;
+    setBadge(wsStatusEl, 'WS conectado', 'badge ok');
+    updateControlsState();
+  };
   ws.onclose = (ev) => {
     setBadge(wsStatusEl, 'WS desconectado', 'badge bad');
+    updateControlsState();
     if (ev.code === 1008) handleUnauthorized(401);
+    if (ev.code !== 1008) scheduleReconnect();
   };
   ws.onerror = (ev) => {
     console.error('[UI] WS error', ev);
     setBadge(wsStatusEl, 'WS error', 'badge bad');
+    updateControlsState();
   };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
@@ -76,6 +125,7 @@ function connectWS() {
     } else if (msg.type === 'panel') {
       panelOnline = !!msg.online;
       renderPanelStatus();
+      updateControlsState();
     } else if (msg.type === 'ack') {
       const ok = !!msg.ok;
       const msgText = msg.message || (ok ? 'Accion ejecutada' : 'Accion rechazada');
@@ -83,6 +133,16 @@ function connectWS() {
       showToast(`${title}: ${msgText}`, ok ? 'ok' : 'bad');
     }
   };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  setBadge(wsStatusEl, `WS reconectando en ${Math.round(reconnectDelayMs / 1000)}s`, 'badge warn');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectWS();
+  }, reconnectDelayMs);
+  reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10000);
 }
 
 function upsert(arr, item, key) {
@@ -118,6 +178,7 @@ function renderPartitions() {
       tr.innerHTML = `<td>${p.id}</td><td><span class="${badgeCls}">${p.status}</span>${readyBadge}</td>`;
       partitionTable.appendChild(tr);
     });
+  updateControlsState();
 }
 
 function renderZones() {
@@ -133,10 +194,10 @@ function renderZones() {
     const tr = document.createElement('tr');
     const btn = document.createElement('button');
     btn.textContent = z.bypass ? 'Quitar bypass' : 'Aplicar bypass';
-    btn.className = 'arm-btn';
-    btn.disabled = !ws || ws.readyState !== WebSocket.OPEN || !panelOnline;
+    btn.className = 'arm-btn zone-bypass-btn';
+    btn.disabled = !isWsReady() || !panelOnline;
     btn.addEventListener('click', () => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!isWsReady()) return;
       ws.send(JSON.stringify({ type: 'bypass', zoneId: z.id }));
     });
     tr.innerHTML = `<td>${z.id}</td><td>${z.label || ''}</td>
@@ -147,16 +208,18 @@ function renderZones() {
     zoneTable.appendChild(tr);
   });
   zonesCount.textContent = `${filtered.length} zonas mostradas / ${snapshot.zones.length} total`;
+  updateControlsState();
 }
 
 function renderPanelStatus() {
   if (panelOnline) setBadge(panelOnlineEl, 'Panel online', 'badge accent');
   else setBadge(panelOnlineEl, 'Panel offline', 'badge bad');
+  updateControlsState();
 }
 
 armButtons.forEach((btn) => {
   btn.addEventListener('click', () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!isWsReady()) return;
     const partitionId = Number(partitionInput.value);
     const mode = btn.dataset.mode;
     ws.send(JSON.stringify({ type: 'arm', partitionId, mode }));
@@ -177,7 +240,9 @@ if (logoutBtn) {
 window.addEventListener('DOMContentLoaded', async () => {
   setBadge(wsStatusEl, 'WS conectando...', 'badge warn');
   setBadge(panelOnlineEl, 'Panel offline', 'badge bad');
+  updateControlsState();
   await loadSnapshot();
+  await loadSystemInfo();
   connectWS();
 });
 

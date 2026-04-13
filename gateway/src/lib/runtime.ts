@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
+const GATEWAY_PACKAGE_PATH = path.join(REPO_ROOT, 'gateway', 'package.json');
 const RUNTIME_ROOT = path.join(REPO_ROOT, 'runtime');
 const DATA_DIR = process.env.RISCO_DATA_DIR || path.join(RUNTIME_ROOT, 'data');
 const CONFIG_PATH = process.env.RISCO_CONFIG_FILE || process.env.RISCO_MQTT_HA_CONFIG_FILE || path.join(DATA_DIR, 'config.json');
@@ -21,6 +22,17 @@ export interface RuntimePaths {
   hostIpScript: string;
 }
 
+export interface PlatformInfo {
+  platform: NodeJS.Platform;
+  nodeVersion: string;
+  appVersion: string;
+  dataDir: string;
+  configPath: string;
+  publicDir: string;
+  hostIpSupported: boolean;
+  uptimeSeconds: number;
+}
+
 export function getRuntimePaths(): RuntimePaths {
   return {
     repoRoot: REPO_ROOT,
@@ -37,4 +49,27 @@ export function getRuntimePaths(): RuntimePaths {
 export function ensureRuntimeDirectories() {
   fs.mkdirSync(RUNTIME_ROOT, { recursive: true });
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function getAppVersion(): string {
+  try {
+    const raw = fs.readFileSync(GATEWAY_PACKAGE_PATH, 'utf-8');
+    const pkg = JSON.parse(raw);
+    return typeof pkg.version === 'string' ? pkg.version : 'unknown';
+  } catch (_err) {
+    return 'unknown';
+  }
+}
+
+export function getPlatformInfo(): PlatformInfo {
+  return {
+    platform: process.platform,
+    nodeVersion: process.version,
+    appVersion: getAppVersion(),
+    dataDir: DATA_DIR,
+    configPath: CONFIG_PATH,
+    publicDir: PUBLIC_DIR,
+    hostIpSupported: fs.existsSync(HOST_IP_SCRIPT),
+    uptimeSeconds: Math.round(process.uptime()),
+  };
 }

@@ -2,7 +2,9 @@
 
 Gateway Web + Modbus TCP/IP para paneles de intrusion RISCO, orientado a Raspberry Pi 5.
 
-Esta version 2 simplifica la estructura del repo sin cambiar la logica ni el objetivo del proyecto:
+Proyecto independiente para Raspberry Pi 5. Su objetivo es operar como gateway estable entre paneles RISCO, la interfaz web y clientes Modbus TCP.
+
+Mantiene la logica y el objetivo operativo del gateway:
 - comunicacion LAN con el panel RISCO
 - dashboard web
 - menu de configuracion
@@ -10,7 +12,7 @@ Esta version 2 simplifica la estructura del repo sin cambiar la logica ni el obj
 - login web y gestion de usuarios
 - soporte experimental para particiones de dos digitos
 
-No usa Docker. El objetivo es desarrollar desde Windows y desplegar/actualizar en Raspberry Pi mediante GitHub.
+No usa Docker. El flujo recomendado es desarrollar en Windows con VS Code y desplegar/actualizar en Raspberry Pi mediante GitHub.
 
 ## Arquitectura del repo
 
@@ -77,18 +79,6 @@ En este PC la ruta es:
 C:\manting_rpi\risco_stack_RPi_V2
 ```
 
-### Remotos Git actuales
-
-En esta copia local ya quedo asi:
-- `origin` -> `https://github.com/jatsoca/Risco_Stack_RPi_V2.git`
-- `old-origin` -> `https://github.com/jatsoca/risco_stack_RPi.git`
-
-Verificar:
-
-```powershell
-git remote -v
-```
-
 ### Flujo de commit y push desde VS Code
 
 1. Abre en VS Code la carpeta:
@@ -101,7 +91,7 @@ C:\manting_rpi\risco_stack_RPi_V2
 3. En Source Control revisa los archivos modificados.
 4. Escribe el mensaje de commit.
 5. Haz `Commit`.
-6. Haz `Push` al repo nuevo.
+6. Haz `Push` al repositorio GitHub del proyecto.
 
 Si prefieres terminal en Windows:
 

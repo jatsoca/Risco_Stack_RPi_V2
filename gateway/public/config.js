@@ -1,6 +1,8 @@
 const statusMsg = document.getElementById('status-msg');
 const passMsg = document.getElementById('pass-msg');
 const logoutBtn = document.getElementById('logout-btn');
+const platformMsg = document.getElementById('platform-msg');
+const serviceMsg = document.getElementById('service-msg');
 
 const setStatus = (msg, ok = true) => {
   if (!statusMsg) return;
@@ -41,6 +43,16 @@ const fillConfig = (cfg) => {
   document.getElementById('heartbeatMs').value = cfg.heartbeat_interval_ms ?? 0;
 };
 
+const fillSystemInfo = (info) => {
+  if (platformMsg) {
+    platformMsg.textContent = `Plataforma: ${info.platform} | Node: ${info.nodeVersion} | Version app: ${info.appVersion}`;
+  }
+  if (serviceMsg) {
+    const hostIpState = info.hostIpSupported ? 'Cambio de IP disponible' : 'Cambio de IP no disponible';
+    serviceMsg.textContent = `Config: ${info.configPath} | Data: ${info.dataDir} | Uptime: ${info.uptimeSeconds}s | ${hostIpState}`;
+  }
+};
+
 const loadConfig = async () => {
   try {
     const res = await fetch('/api/config');
@@ -52,6 +64,19 @@ const loadConfig = async () => {
   } catch (e) {
     console.error(e);
     setStatus('No se pudo cargar la configuracion', false);
+  }
+};
+
+const loadSystemInfo = async () => {
+  try {
+    const res = await fetch('/api/system/info');
+    if (handleUnauthorized(res)) return;
+    if (!res.ok) throw new Error('system_info_failed');
+    const data = await res.json();
+    fillSystemInfo(data.info || {});
+  } catch (e) {
+    console.error(e);
+    if (platformMsg) platformMsg.textContent = 'No se pudo obtener informacion del runtime';
   }
 };
 
@@ -230,3 +255,4 @@ document.getElementById('apply-host-ip')?.addEventListener('click', (e) => {
 });
 
 window.addEventListener('DOMContentLoaded', loadConfig);
+window.addEventListener('DOMContentLoaded', loadSystemInfo);
