@@ -1,21 +1,26 @@
-# Dependencias y builds
+# Dependencies
 node_modules/
-dist/
+gateway/node_modules/
+bridge/node_modules/
 
-# Logs y temporales
+# Build output
+dist/
+gateway/dist/
+bridge/dist/
+
+# Runtime data
+runtime/data/*
+!runtime/data/.gitkeep
+
+# Logs and temp files
 npm-debug.log*
 yarn-error.log*
 *.log
+*.tar
+panel.log
 
-# Editor/OS
+# Editor / OS
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-
-# Docker artefactos locales
-*.tar
-panel.log
-
-# Datos de runtime
-risco/data/

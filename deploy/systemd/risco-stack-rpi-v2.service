@@ -1,0 +1,16 @@
+[Unit]
+Description=Risco Stack RPi V2 Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/pi/Risco_Stack_RPi_V2/gateway
+ExecStart=/usr/bin/node /home/pi/Risco_Stack_RPi_V2/gateway/dist/main.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

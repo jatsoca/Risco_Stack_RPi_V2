@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2015",
+    "declaration": true,
+    "outDir": "./dist",
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@jatsoca/risco-bridge/*": [
+        "../bridge/dist/*"
+      ],
+      "@jatsoca/risco-bridge": [
+        "../bridge/dist"
+      ]
+    },
+    "lib": [
+      "ES2021"
+    ]
+  },
+  "include": [
+    "src/**/*"
+  ]
+}

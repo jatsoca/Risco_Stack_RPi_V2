@@ -1,232 +1,346 @@
-# Risco Gateway (Web + Modbus TCP)
-By Jaime Acosta. Github: jatsoca
+# Risco_Stack_RPi_V2
 
-Gateway para paneles RISCO LightSYS/LightSYS Plus y ProSYS Plus. Expone:
-- Dashboard web (estado en tiempo real, armado/desarmado, bypass).
-- Modbus TCP (puerto 502) para integración con BMS/SCADA.
-- UI de login + página de configuración + restablecer a fábrica.
-- Opción de cambio de IP del Raspberry desde la UI (requiere script en el host).
+Gateway Web + Modbus TCP/IP para paneles de intrusion RISCO, orientado a Raspberry Pi 5.
 
-Repositorio: `https://github.com/jatsoca/risco_stack_RPi.git`
+Esta version 2 simplifica la estructura del repo sin cambiar la logica ni el objetivo del proyecto:
+- comunicacion LAN con el panel RISCO
+- dashboard web
+- menu de configuracion
+- servidor Modbus TCP
+- login web y gestion de usuarios
+- soporte experimental para particiones de dos digitos
 
-## Estructura
-- `docker-compose.yml`
-- `risco/`
-  - `config.default.json` (plantilla)
-  - `config.json` (ejemplo)
-  - `data/` (persistencia: `config.json`, `users.json`, logs, etc.)
-  - `Dockerfile.risco`
-  - `app/` (web + modbus)
-  - `risco-lan-bridge/` (librería local: comunicación con panel RISCO)
-  - `scripts/` (scripts del host, ej. cambio IP)
+No usa Docker. El objetivo es desarrollar desde Windows y desplegar/actualizar en Raspberry Pi mediante GitHub.
 
-## Ejecutar con Docker (PC o Raspberry)
-```bash
-docker compose down
-docker compose build --no-cache risco
-docker compose up -d
-```
-- Web: `http://localhost:1001`
-- Modbus TCP: puerto `502`
+## Arquitectura del repo
 
-## Raspberry Pi sin Docker (recomendado)
-### 1) Instalar dependencias y compilar
-```bash
-sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get install -y git nodejs npm
-
-git clone https://github.com/jatsoca/risco_stack_RPi.git
-
-cd risco_stack_RPi/risco/risco-lan-bridge
-npm install --include=dev
-npm run build
-
-cd ../app
-npm install --include=dev
-npm run build
+```text
+Risco_Stack_RPi_V2/
+|- bridge/            # Nucleo de comunicacion con el panel RISCO
+|- gateway/           # Web UI, auth, config y servidor Modbus TCP
+|- runtime/           # Configuracion default y datos persistentes
+|- scripts/           # Scripts de soporte para Raspberry Pi
+|- deploy/systemd/    # Servicio systemd de ejemplo
+|- README.md
+`- LICENSE
 ```
 
-### 2) Primer arranque (manual)
-El servicio lee el config desde `~/risco_stack_RPi/risco/app/config.json` (o la ruta definida en `RISCO_MQTT_HA_CONFIG_FILE`).
-Si no existe, copia los defaults desde `risco/config.default.json`.
+### `bridge/`
+Modulo de bajo nivel del panel:
+- sockets y sesion con el panel
+- descubrimiento de zonas, salidas y particiones
+- parser de estados
+- armado, desarmado y bypass
+- estrategias para particiones 10+
 
-Nota: cuando actualizas el repo con `git pull`, el `config.json` existente NO se sobrescribe (se mantiene tu configuración).
+### `gateway/`
+Aplicacion principal:
+- servidor web
+- login
+- pagina de configuracion
+- dashboard en tiempo real
+- servidor Modbus TCP
+- bootstrap del runtime
 
-En Raspberry, el puerto `502` requiere permisos de root (puerto <1024):
+### `runtime/`
+Runtime persistente:
+- `runtime/config.default.json`: plantilla versionada
+- `runtime/data/config.json`: config activa
+- `runtime/data/users.json`: usuarios del login
+
+### `scripts/`
+- `scripts/build-rpi.sh`: instala dependencias y compila todo
+- `scripts/set-ip-rpi.sh`: cambio de IP del Raspberry desde la web
+
+### `deploy/systemd/`
+- `deploy/systemd/risco-stack-rpi-v2.service`: servicio para arranque automatico
+
+## Flujo recomendado de trabajo
+
+La idea operativa desde ahora es esta:
+
+1. Desarrollas y haces cambios en Windows con VS Code.
+2. Haces commit y push al repo GitHub `Risco_Stack_RPi_V2`.
+3. En la Raspberry Pi 5 haces `git pull`.
+4. Recompilas.
+5. Reinicias el servicio.
+
+Asi no vuelves a copiar el proyecto manualmente desde cero.
+
+## Desarrollo en Windows
+
+### Ruta local de trabajo
+
+En este PC la ruta es:
+
+```powershell
+C:\manting_rpi\risco_stack_RPi_V2
+```
+
+### Remotos Git actuales
+
+En esta copia local ya quedo asi:
+- `origin` -> `https://github.com/jatsoca/Risco_Stack_RPi_V2.git`
+- `old-origin` -> `https://github.com/jatsoca/risco_stack_RPi.git`
+
+Verificar:
+
+```powershell
+git remote -v
+```
+
+### Flujo de commit y push desde VS Code
+
+1. Abre en VS Code la carpeta:
+
+```powershell
+C:\manting_rpi\risco_stack_RPi_V2
+```
+
+2. Haz los cambios.
+3. En Source Control revisa los archivos modificados.
+4. Escribe el mensaje de commit.
+5. Haz `Commit`.
+6. Haz `Push` al repo nuevo.
+
+Si prefieres terminal en Windows:
+
+```powershell
+cd C:\manting_rpi\risco_stack_RPi_V2
+git add -A
+git commit -m "Release V2.0: simplify architecture for Raspberry Pi"
+git push -u origin main
+```
+
+## Despliegue inicial en Raspberry Pi 5
+
+### 1. Clonar el repo
+
 ```bash
-cd ~/risco_stack_RPi/risco/app
+cd /home/pi
+git clone https://github.com/jatsoca/Risco_Stack_RPi_V2.git
+cd /home/pi/Risco_Stack_RPi_V2
+```
+
+### 2. Instalar Node.js y npm
+
+```bash
+sudo apt-get update
+sudo apt-get install -y nodejs npm
+node -v
+npm -v
+```
+
+Node.js 20 recomendado.
+
+### 3. Compilar el proyecto
+
+```bash
+cd /home/pi/Risco_Stack_RPi_V2
+chmod +x ./scripts/build-rpi.sh
+./scripts/build-rpi.sh
+```
+
+Ese script hace:
+1. `npm install` en `bridge`
+2. `npm run build` en `bridge`
+3. `npm install` en `gateway`
+4. `npm run build` en `gateway`
+
+### 4. Primer arranque manual
+
+```bash
+cd /home/pi/Risco_Stack_RPi_V2/gateway
 sudo node dist/main.js
 ```
 
-### 3) Servicio de arranque automático (systemd)
-Crear el unit file (como root):
+En el primer arranque:
+- si `runtime/data/config.json` no existe, se crea desde `runtime/config.default.json`
+- si `runtime/data/users.json` no existe, se crea automaticamente
+
+### Credenciales iniciales
+
+- usuario: `admin`
+- contrasena: `Admin123`
+
+### Endpoints principales
+
+- web: `http://IP_DEL_RPI:1001`
+- config: `http://IP_DEL_RPI:1001/config`
+- health: `http://IP_DEL_RPI:1001/health`
+- Modbus TCP: puerto `502`
+
+## Actualizacion en Raspberry Pi 5 desde GitHub
+
+Cada vez que hagas cambios en Windows y los subas a GitHub:
+
 ```bash
-sudo tee /etc/systemd/system/risco-gateway.service >/dev/null <<'EOF'
-[Unit]
-Description=Risco Gateway (Web + Modbus)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/home/pi/risco_stack_RPi/risco/app
-ExecStart=/usr/bin/node /home/pi/risco_stack_RPi/risco/app/dist/main.js
-Restart=on-failure
-RestartSec=5
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-EOF
+cd /home/pi/Risco_Stack_RPi_V2
+git pull
+./scripts/build-rpi.sh
+sudo systemctl restart risco-stack-rpi-v2.service
 ```
 
-Activar y arrancar:
+Si aun no tienes el servicio instalado, puedes arrancar manualmente:
+
 ```bash
+cd /home/pi/Risco_Stack_RPi_V2/gateway
+sudo node dist/main.js
+```
+
+Este es el flujo recomendado a partir de ahora:
+- Windows: editas, commit, push
+- Raspberry: pull, build, restart
+
+## Servicio systemd en Raspberry Pi 5
+
+### Instalar el servicio
+
+```bash
+sudo cp /home/pi/Risco_Stack_RPi_V2/deploy/systemd/risco-stack-rpi-v2.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now risco-gateway.service
+sudo systemctl enable --now risco-stack-rpi-v2.service
 ```
 
-Ver estado y logs:
+### Ver estado y logs
+
 ```bash
-sudo systemctl status risco-gateway.service
-sudo journalctl -u risco-gateway.service -f
+sudo systemctl status risco-stack-rpi-v2.service
+sudo journalctl -u risco-stack-rpi-v2.service -f
 ```
 
-Alternativa (sin root): puedes dar capacidad al binario `node` para bindear puerto 502:
+### Si no quieres usar root
+
+El puerto `502` requiere privilegios por ser menor a `1024`.
+
+Alternativa:
+
 ```bash
 sudo setcap 'cap_net_bind_service=+ep' /usr/bin/node
 ```
-y en el `service` usar `User=pi`. (Si usas esta alternativa, el cambio de IP desde la UI deberá ejecutarse con `sudoers`.)
 
-### 4) Actualizar el gateway en la Raspberry (git pull)
-Cada vez que subas cambios a GitHub y quieras aplicarlos en la Pi (sin reinstalar desde cero):
+Luego ajustas el servicio para correr como `pi`.
+
+## Configuracion del gateway
+
+### Rutas de runtime por defecto
+
+- config base: `runtime/config.default.json`
+- config activa: `runtime/data/config.json`
+- usuarios: `runtime/data/users.json`
+- assets web: `gateway/public`
+- script cambio IP: `scripts/set-ip-rpi.sh`
+
+### Variables de entorno soportadas
+
+- `RISCO_CONFIG_FILE`
+- `RISCO_DEFAULT_CONFIG_FILE`
+- `RISCO_DATA_DIR`
+- `RISCO_PUBLIC_DIR`
+- `RISCO_HOST_IP_SCRIPT`
+
+Compatibilidad heredada:
+- `RISCO_MQTT_HA_CONFIG_FILE`
+- `RISCO_MQTT_HA_DEFAULT_CONFIG`
+
+### Parametros principales
+
+- `panel.panelIp`
+- `panel.panelPort`
+- `panel.panelPassword`
+- `panel.panelId`
+- `panel.socketMode`
+- `panel.watchDogInterval`
+- `panel.commandsLog`
+- `web.http_port`
+- `modbus.port`
+- `modbus.host`
+
+## Particiones de dos digitos
+
+Se mantiene el ajuste experimental para particiones `10+`.
+
+Estrategias disponibles:
+- `equals_star_decimal`
+- `colon_decimal`
+- `colon_zero_pad_3`
+- `equals_zero_pad_3`
+- `equals_hex`
+- `equals_hex_zero_pad_2`
+- `equals_plain`
+
+Modo recomendado por ahora:
+
+```json
+"partitionCommandMode": "probe"
+```
+
+Orden default:
+
+```json
+[
+  "equals_star_decimal",
+  "colon_decimal",
+  "colon_zero_pad_3",
+  "equals_zero_pad_3",
+  "equals_hex_zero_pad_2",
+  "equals_plain"
+]
+```
+
+El gateway deja en log la estrategia y la trama exacta enviada al panel para que puedas validar cual funciona mejor.
+
+## Cambio de IP del Raspberry desde la web
+
+La web usa:
+
+```text
+scripts/set-ip-rpi.sh
+```
+
+Si quieres usarlo como script del sistema:
+
 ```bash
-cd ~/risco_stack_RPi
+sudo install -m 0755 /home/pi/Risco_Stack_RPi_V2/scripts/set-ip-rpi.sh /usr/local/bin/set-ip-rpi.sh
+```
+
+Si el servicio no corre como `root`, debes autorizarlo con `sudoers`.
+
+## Validacion hecha en esta reorganizacion
+
+Validado en esta sesion:
+- instalacion limpia de dependencias en `bridge`
+- instalacion limpia de dependencias en `gateway`
+- compilacion de `bridge`
+- compilacion de `gateway`
+- arranque de prueba del gateway
+- respuesta correcta de `/health`
+
+No validado aqui:
+- conexion real a un panel fisico
+- escritura real Modbus con cliente externo
+- ejecucion real de `systemd` en Raspberry Pi
+
+## Resumen operativo
+
+Desde ahora el flujo recomendado es:
+
+### En Windows
+
+```powershell
+cd C:\manting_rpi\risco_stack_RPi_V2
+git add -A
+git commit -m "tu cambio"
+git push
+```
+
+### En Raspberry Pi 5
+
+```bash
+cd /home/pi/Risco_Stack_RPi_V2
 git pull
-
-cd ~/risco_stack_RPi/risco/risco-lan-bridge
-npm install --include=dev
-npm run build
-
-cd ~/risco_stack_RPi/risco/app
-npm install --include=dev
-npm run build
-
-sudo systemctl restart risco-gateway.service
-sudo journalctl -u risco-gateway.service -f
-```
-Notas:
-- Si cambiaste `risco-gateway.service`, corre `sudo systemctl daemon-reload` antes del restart.
-- Si cambiaste defaults en `risco/config.default.json`, NO sobrescribe tu `config.json` existente: revisa/merge manual en la UI o editando el archivo runtime.
-
-## UI: credenciales y configuración
-- Login web por defecto: usuario `admin`, contraseña `Admin123` (se guarda hash en `/data/users.json`).
-- Página de configuración: `http://IP:1001/config`
-- Botones: Guardar, Guardar y reiniciar, Reiniciar servicio, Restablecer a fábrica, Cambiar contraseña admin.
-
-## Cambio de IP del Raspberry desde la UI (NetworkManager / nmcli)
-Cuando cambias la IP desde la página `/config`, la conexión se corta y debes reconectar a la nueva IP.
-
-### Instalar el script del host
-Este proyecto trae el script en `risco/scripts/set-ip-rpi.sh`. Instálalo en el host así:
-```bash
-sudo install -m 0755 /home/pi/risco_stack_RPi/risco/scripts/set-ip-rpi.sh /usr/local/bin/set-ip-rpi.sh
+./scripts/build-rpi.sh
+sudo systemctl restart risco-stack-rpi-v2.service
 ```
 
-Opcional: si NO ejecutas el gateway como root, permite ejecutar el script sin contraseña:
-- Crear `/etc/sudoers.d/risco-ip` con:
-  ```
-  pi ALL=(root) NOPASSWD:/usr/local/bin/set-ip-rpi.sh
-  ```
-
-Opcional: si quieres forzar un perfil específico de NetworkManager (por ejemplo `Cableada1`), exporta `RISCO_NET_CON=Cableada1` en el entorno del servicio.
-
-### Script completo (`/usr/local/bin/set-ip-rpi.sh`)
-```bash
-#!/bin/sh
-set -eu
-
-IP="${1:-}"
-CIDR="${2:-}"
-GW="${3:-}"
-
-DEVICE="${RISCO_NET_DEVICE:-eth0}"
-CONNECTION="${RISCO_NET_CON:-}"
-
-if [ -z "$IP" ] || [ -z "$CIDR" ] || [ -z "$GW" ]; then
-  echo "missing args: IP CIDR GW" >&2
-  exit 1
-fi
-
-is_ip() {
-  echo "$1" | awk -F. 'NF==4 && $1>=0 && $1<=255 && $2>=0 && $2<=255 && $3>=0 && $3<=255 && $4>=0 && $4<=255 {exit 0} {exit 1}'
-}
-
-is_cidr() {
-  case "$1" in
-    ''|*[!0-9]*) return 1 ;;
-    *) [ "$1" -ge 0 ] && [ "$1" -le 32 ] ;;
-  esac
-}
-
-if ! is_ip "$IP" || ! is_ip "$GW" || ! is_cidr "$CIDR"; then
-  echo "invalid args" >&2
-  exit 1
-fi
-
-# Prefer NetworkManager if present (Bookworm Pi OS often uses it).
-if command -v nmcli >/dev/null 2>&1; then
-  if [ -z "$CONNECTION" ]; then
-    CONNECTION="$(nmcli -t -f NAME,DEVICE con show --active | awk -F: -v dev="$DEVICE" '$2==dev {print $1; exit}')"
-  fi
-  if [ -z "$CONNECTION" ]; then
-    CONNECTION="$(nmcli -t -f NAME,DEVICE con show | awk -F: -v dev="$DEVICE" '$2==dev {print $1; exit}')"
-  fi
-  if [ -z "$CONNECTION" ]; then
-    echo "no NetworkManager connection found for device: $DEVICE" >&2
-    exit 2
-  fi
-
-  nmcli con mod "$CONNECTION" ipv4.method manual
-  nmcli con mod "$CONNECTION" ipv4.addresses "$IP/$CIDR"
-  nmcli con mod "$CONNECTION" ipv4.gateway "$GW"
-  nmcli con mod "$CONNECTION" ipv4.dns "$GW 1.1.1.1 8.8.8.8"
-  nmcli con mod "$CONNECTION" ipv4.ignore-auto-dns yes
-
-  nmcli con down "$CONNECTION" || true
-  nmcli con up "$CONNECTION"
-
-  echo "OK: $CONNECTION -> $IP/$CIDR gw $GW"
-  exit 0
-fi
-
-# Fallback: dhcpcd (older Raspberry Pi OS images).
-CONF=/etc/dhcpcd.conf
-cat <<EOF > "$CONF"
-interface $DEVICE
-static ip_address=${IP}/${CIDR}
-static routers=${GW}
-static domain_name_servers=${GW}
-EOF
-
-systemctl restart dhcpcd 2>/dev/null || service dhcpcd restart 2>/dev/null || true
-echo "OK: dhcpcd -> $IP/$CIDR gw $GW"
-```
-
-## Modbus (resumen)
-- Holding particiones regs 1-32 (uint16): `0=disarmed, 1=armed(home/away), 2=triggered, 3=Ready, 4=NotReady`.
-- Holding zonas regs 33-544 (uint16): `0=cerrada, 1=abierta, 2=bypass`.
-- Discrete inputs: bits 0-31 particiones alarmadas; bits 32-543 zonas abiertas.
-- Escritura: partición reg=0/1 desarma/arma; zona reg=2 aplica bypass (0 quita).
-
-## Evitar suspensión/reposo en Raspberry Pi
-Raspberry Pi OS normalmente no entra en “sleep” como un PC, pero para máxima estabilidad:
-- Desactivar blanking de pantalla (si aplica): `sudo raspi-config` (Interface Options).
-- Evitar powersave de Wi‑Fi (si usas Wi‑Fi):
-  - Crear `/etc/NetworkManager/conf.d/default-wifi-powersave-on.conf`:
-    ```
-    [connection]
-    wifi.powersave = 2
-    ```
-  - Reiniciar: `sudo systemctl restart NetworkManager` (o reboot).
+Ese es el camino correcto para evolucionar el proyecto sin volver a copiar todo manualmente.

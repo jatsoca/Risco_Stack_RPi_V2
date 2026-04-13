@@ -1,5 +1,0 @@
-app/node_modules
-app/dist
-data
-mosquitto/data
-mosquitto/log
