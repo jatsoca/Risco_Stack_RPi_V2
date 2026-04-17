@@ -53,6 +53,12 @@ const allowedPartitionCommandStrategies = [
   'equals_zero_pad_3',
   'equals_hex',
   'equals_hex_zero_pad_2',
+  'p_suffix_equals_plain',
+  'p_suffix_colon_decimal',
+  'p_suffix_colon_zero_pad_3',
+  'p_suffix_equals_zero_pad_3',
+  'p_suffix_equals_hex',
+  'p_suffix_equals_hex_zero_pad_2',
   'equals_plain',
 ];
 

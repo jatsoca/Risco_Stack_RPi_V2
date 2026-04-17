@@ -64,15 +64,21 @@
               <option value="equals_zero_pad_3">equals_zero_pad_3</option>
               <option value="equals_hex">equals_hex</option>
               <option value="equals_hex_zero_pad_2">equals_hex_zero_pad_2</option>
+              <option value="p_suffix_equals_plain">p_suffix_equals_plain</option>
+              <option value="p_suffix_colon_decimal">p_suffix_colon_decimal</option>
+              <option value="p_suffix_colon_zero_pad_3">p_suffix_colon_zero_pad_3</option>
+              <option value="p_suffix_equals_zero_pad_3">p_suffix_equals_zero_pad_3</option>
+              <option value="p_suffix_equals_hex">p_suffix_equals_hex</option>
+              <option value="p_suffix_equals_hex_zero_pad_2">p_suffix_equals_hex_zero_pad_2</option>
               <option value="equals_plain">equals_plain</option>
             </select>
           </div>
           <div class="field">
             <label for="partitionCommandProbeOrder">Orden probe</label>
-            <input id="partitionCommandProbeOrder" name="partitionCommandProbeOrder" placeholder="equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,equals_plain">
+            <input id="partitionCommandProbeOrder" name="partitionCommandProbeOrder" placeholder="equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,p_suffix_equals_plain,p_suffix_equals_zero_pad_3,p_suffix_colon_decimal,p_suffix_colon_zero_pad_3,p_suffix_equals_hex_zero_pad_2,equals_plain">
           </div>
         </div>
-        <p class="muted">Para particiones de dos d&iacute;gitos puedes fijar una sola estrategia o probar varias. `equals_plain` queda al final porque es la forma m&aacute;s ambigua.</p>
+        <p class="muted">Para particiones de dos d&iacute;gitos puedes fijar una sola estrategia o probar varias. Las variantes `p_suffix_*` prueban comandos tipo `ARMP` o `DISARMP`; `equals_plain` queda al final porque es la forma m&aacute;s ambigua.</p>
 
         <h3>Servicios</h3>
         <div class="form-grid">

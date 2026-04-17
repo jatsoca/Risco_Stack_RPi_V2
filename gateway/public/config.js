@@ -33,7 +33,7 @@ const fillConfig = (cfg) => {
   document.getElementById('partitionCommandStrategy').value = cfg.panel?.partitionCommandStrategy || 'equals_star_decimal';
   document.getElementById('partitionCommandProbeOrder').value = Array.isArray(cfg.panel?.partitionCommandProbeOrder)
     ? cfg.panel.partitionCommandProbeOrder.join(',')
-    : (cfg.panel?.partitionCommandProbeOrder || 'equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,equals_plain');
+    : (cfg.panel?.partitionCommandProbeOrder || 'equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,p_suffix_equals_plain,p_suffix_equals_zero_pad_3,p_suffix_colon_decimal,p_suffix_colon_zero_pad_3,p_suffix_equals_hex_zero_pad_2,equals_plain');
   document.getElementById('webPort').value = cfg.web?.http_port || '';
   document.getElementById('wsPath').value = cfg.web?.ws_path || '';
   document.getElementById('modbusHost').value = cfg.modbus?.host || '';

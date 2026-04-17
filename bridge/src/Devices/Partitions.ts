@@ -33,6 +33,7 @@ import { logger } from '../Logger'
 import { assertIsDefined } from '../Assertions'
 import { RiscoCommandError } from '../RiscoError'
 import {
+  buildPartitionCommandFromStrategy,
   DEFAULT_PARTITION_COMMAND_STRATEGY,
   PartitionCommandStrategy,
 } from '../PartitionCommandConfig'
@@ -150,32 +151,6 @@ export class Partition extends EventEmitter {
     }
   }
 
-  private buildPartitionCommand(command: string, strategy: PartitionCommandStrategy): string {
-    const decimal = `${this.Id}`
-    const decimalPadded2 = decimal.padStart(2, '0')
-    const decimalPadded3 = decimal.padStart(3, '0')
-    const hex = this.Id.toString(16).toUpperCase()
-    const hexPadded2 = hex.padStart(2, '0')
-
-    switch (strategy) {
-      case 'equals_star_decimal':
-        return `${command}=*${decimal}`
-      case 'colon_decimal':
-        return `${command}:${decimal}`
-      case 'colon_zero_pad_3':
-        return `${command}:${decimalPadded3}`
-      case 'equals_zero_pad_3':
-        return `${command}=${decimalPadded3}`
-      case 'equals_hex':
-        return `${command}=${hex}`
-      case 'equals_hex_zero_pad_2':
-        return `${command}=${hexPadded2}`
-      case 'equals_plain':
-      default:
-        return `${command}=${decimal}`
-    }
-  }
-
   private getPartitionCommandAttempts(command: string): PartitionCommandAttempt[] {
     const config = this.riscoComm.getPartitionCommandConfig()
     const strategies = (this.Id >= 10 && config.mode === 'probe')
@@ -185,7 +160,7 @@ export class Partition extends EventEmitter {
     const uniqueStrategies = [...new Set(strategies)]
     return uniqueStrategies.map(strategy => ({
       strategy,
-      rawCommand: this.buildPartitionCommand(command, strategy),
+      rawCommand: buildPartitionCommandFromStrategy(command as 'ARM' | 'STAY' | 'DISARM', this.Id, strategy),
     }))
   }
 
