@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>BACnet/IP Risco Gateway</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><h1>BACnet/IP</h1></div>
+    <nav class="nav-actions">
+      <a href="/" class="btn-link">Dashboard</a>
+      <a href="/diagnostics" class="btn-link">Diagn&oacute;stico</a>
+      <a href="/modbus" class="btn-link">Modbus</a>
+      <a href="/config" class="btn-link">Config</a>
+      <button id="logout-btn" class="ghost">Salir</button>
+    </nav>
+  </header>
+  <div class="page">
+    <div class="card">
+      <h2>Configuraci&oacute;n BACnet/IP</h2>
+      <p class="muted">Servidor BACnet/IP para BMS. La escritura queda bloqueada por defecto; si se habilita, AV partici&oacute;n acepta 0=desarmar y 1=armar total, AV zona acepta 0=normal y 2=bypass.</p>
+      <form id="bacnet-form" class="form-grid">
+        <label class="inline-check"><input id="bacnetEnable" type="checkbox"> Habilitar BACnet/IP</label>
+        <div class="field"><label>Puerto UDP</label><input id="bacnetPort" type="number" min="1" max="65535"></div>
+        <div class="field"><label>Interface</label><input id="bacnetInterface" placeholder="0.0.0.0"></div>
+        <div class="field"><label>Broadcast</label><input id="bacnetBroadcast" placeholder="255.255.255.255"></div>
+        <div class="field"><label>Device ID</label><input id="bacnetDeviceId" type="number" min="0" max="4194302"></div>
+        <div class="field"><label>Device Name</label><input id="bacnetDeviceName"></div>
+        <div class="field"><label>Vendor ID</label><input id="bacnetVendorId" type="number" min="0"></div>
+        <div class="field"><label>APDU timeout ms</label><input id="bacnetApduTimeout" type="number" min="1000"></div>
+        <label class="inline-check"><input id="bacnetAllowWrite" type="checkbox"> Permitir writes BACnet controlados</label>
+      </form>
+      <div class="actions">
+        <button id="save-bacnet">Guardar</button>
+        <button id="save-restart-bacnet" class="ghost">Guardar y reiniciar</button>
+      </div>
+      <p id="bacnet-msg" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h2>Estado y Mapa BACnet</h2>
+      <p id="bacnet-status" class="muted">Cargando...</p>
+      <table id="bacnet-map"><thead><tr><th>Objeto</th><th>Rango</th><th>Descripci&oacute;n</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="debug-grid">
+      <div class="card">
+        <h2>Particiones BACnet</h2>
+        <table id="bacnet-partitions"><thead><tr><th>Objeto</th><th>ID</th><th>Valor</th><th>Estado</th><th>Ready</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h2>Zonas BACnet</h2>
+        <div class="controls"><input id="zone-filter" placeholder="Filtrar zona..."></div>
+        <table id="bacnet-zones"><thead><tr><th>Objeto</th><th>ID</th><th>Valor</th><th>Abierta</th><th>Bypass</th><th>Etiqueta</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+  <script src="bacnet.js"></script>
+</body>
+</html>

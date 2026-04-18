@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Diagn&oacute;stico Risco Gateway</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><h1>Diagn&oacute;stico</h1></div>
+    <div class="branding">
+      <img src="img/mainting-logo.png" alt="Mainting" class="logo-mainting">
+      <img src="img/risco-logo.png" alt="Risco" class="logo-risco">
+    </div>
+    <nav class="nav-actions">
+      <a href="/" class="btn-link">Dashboard</a>
+      <a href="/modbus" class="btn-link">Modbus</a>
+      <a href="/bacnet" class="btn-link">BACnet</a>
+      <a href="/debug" class="btn-link">Debug</a>
+      <a href="/config" class="btn-link">Config</a>
+      <button id="logout-btn" class="ghost">Salir</button>
+    </nav>
+  </header>
+
+  <div class="page">
+    <div class="metric-grid" id="diagnostic-metrics"></div>
+
+    <div class="card">
+      <h2>Tendencia Operativa</h2>
+      <div class="chart-grid">
+        <div>
+          <h3>Zonas</h3>
+          <div class="bar-row"><span>Abiertas</span><div class="bar"><div id="bar-open-zones"></div></div><strong id="open-zones-value">0</strong></div>
+          <div class="bar-row"><span>Bypass</span><div class="bar"><div id="bar-bypass-zones"></div></div><strong id="bypass-zones-value">0</strong></div>
+        </div>
+        <div>
+          <h3>Particiones</h3>
+          <div class="bar-row"><span>Armadas</span><div class="bar"><div id="bar-armed-parts"></div></div><strong id="armed-parts-value">0</strong></div>
+          <div class="bar-row"><span>Ready</span><div class="bar"><div id="bar-ready-parts"></div></div><strong id="ready-parts-value">0</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Paneles Soportados por el C&oacute;digo</h2>
+      <table id="supported-panels-table">
+        <thead><tr><th>C&oacute;digo</th><th>Modelo</th><th>Zonas</th><th>Particiones</th><th>Salidas</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Eventos Recientes</h2>
+      <div id="recent-events" class="log-stream compact-log"></div>
+    </div>
+  </div>
+
+  <script src="diagnostics.js"></script>
+</body>
+</html>

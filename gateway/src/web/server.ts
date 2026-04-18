@@ -9,12 +9,56 @@ import fs from 'fs';
 import { promises as fsp } from 'fs';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { spawn } from 'child_process';
-import { ensureRuntimeDirectories, getPlatformInfo, getRuntimePaths } from '../lib/runtime';
+import {
+  ensureRuntimeDirectories,
+  getPlatformInfo,
+  getRuntimePaths,
+  requestManagedRestart,
+  scheduleHostIpChange,
+} from '../lib/runtime';
+import {
+  BacnetOptions,
+  buildBacnetMapSummary,
+  encodePartitionValue,
+  encodeZoneValue,
+  normalizeBacnetOptions,
+  startBacnetServer,
+} from '../lib/bacnet';
 
 type PartitionState = { id: number; status: string; ready?: boolean };
 type ZoneState = { id: number; open: boolean; bypass: boolean; label: string };
 type PanelState = { online: boolean };
+export type DebugLogEntry = {
+  id: number;
+  ts: string;
+  level: string;
+  source: string;
+  message: string;
+};
+
+export interface WebDebugTools {
+  getLogs: () => DebugLogEntry[];
+  getAvailableStrategies: () => string[];
+  getPartitionCommandConfig: () => {
+    mode?: string;
+    strategy?: string;
+    probeOrder?: string[];
+  };
+  previewPartitionCommands: (partitionId: number, mode: 'away' | 'home' | 'disarm') => Array<{
+    strategy: string;
+    rawCommand: string;
+  }>;
+  executePartitionCommand: (
+    partitionId: number,
+    mode: 'away' | 'home' | 'disarm',
+    strategy?: string,
+  ) => Promise<any>;
+  executeRawPartitionCommand: (
+    partitionId: number,
+    mode: 'away' | 'home' | 'disarm',
+    rawCommand: string,
+  ) => Promise<any>;
+}
 
 export interface WebOptions {
   http_port: number;
@@ -39,28 +83,34 @@ const DATA_DIR = runtimePaths.dataDir;
 const CONFIG_PATH = runtimePaths.configPath;
 const DEFAULT_CONFIG_PATH = runtimePaths.defaultConfigPath;
 const USERS_FILE = runtimePaths.usersFile;
-const HOST_IP_SCRIPT = runtimePaths.hostIpScript;
 const AUTH_COOKIE = 'risco_auth';
-const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12h
+const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const sessions = new Map<string, Session>();
 
 const allowedLogLevels = ['error', 'warn', 'info', 'verbose', 'debug'];
+const allowedSocketModes = ['direct', 'proxy'];
 const allowedPartitionCommandModes = ['fixed', 'probe'];
 const allowedPartitionCommandStrategies = [
-  'equals_star_decimal',
-  'colon_decimal',
-  'colon_zero_pad_3',
-  'equals_zero_pad_3',
-  'equals_hex',
-  'equals_hex_zero_pad_2',
   'p_suffix_equals_plain',
-  'p_suffix_colon_decimal',
-  'p_suffix_colon_zero_pad_3',
-  'p_suffix_equals_zero_pad_3',
-  'p_suffix_equals_hex',
-  'p_suffix_equals_hex_zero_pad_2',
-  'equals_plain',
 ];
+
+const SUPPORTED_PANELS = [
+  { code: 'RW032', model: 'Agility 4', maxZones: 32, maxPartitions: 3, maxOutputs: 4 },
+  { code: 'RW132', model: 'Agility', maxZones: 36, maxPartitions: 3, maxOutputs: 4 },
+  { code: 'RW232', model: 'WiComm', maxZones: 36, maxPartitions: 3, maxOutputs: 4 },
+  { code: 'RW332', model: 'WiCommPro', maxZones: 36, maxPartitions: 3, maxOutputs: 4 },
+  { code: 'RP432', model: 'LightSYS', maxZones: '32/50 segun firmware', maxPartitions: 4, maxOutputs: '14/32 segun firmware' },
+  { code: 'RP432MP', model: 'LightSYS Plus', maxZones: 128, maxPartitions: 32, maxOutputs: 262 },
+  { code: 'RP512', model: 'ProSYS Plus / GT Plus', maxZones: '64/128 segun firmware', maxPartitions: 32, maxOutputs: 262 },
+];
+
+type ProtocolEvent = {
+  id: number;
+  ts: string;
+  type: string;
+  message: string;
+  detail?: any;
+};
 
 const parseCookies = (cookieHeader?: string) => {
   const list: Record<string, string> = {};
@@ -115,8 +165,7 @@ const ensureConfigFile = async () => {
   ensureRuntimeDirectories();
   if (!fs.existsSync(CONFIG_PATH)) {
     await ensureDir(path.dirname(CONFIG_PATH));
-    const source = DEFAULT_CONFIG_PATH;
-    await fsp.copyFile(source, CONFIG_PATH);
+    await fsp.copyFile(DEFAULT_CONFIG_PATH, CONFIG_PATH);
   }
 };
 
@@ -184,6 +233,7 @@ const writeConfig = async (config: any) => {
 };
 
 const sanitizeLogLevel = (lvl: any) => (allowedLogLevels.includes(lvl) ? lvl : undefined);
+const sanitizeSocketMode = (mode: any) => (allowedSocketModes.includes(mode) ? mode : undefined);
 const sanitizePartitionCommandMode = (mode: any) => (
   allowedPartitionCommandModes.includes(mode) ? mode : undefined
 );
@@ -203,6 +253,10 @@ const sanitizePartitionCommandProbeOrder = (value: any) => {
     ));
   return parsed.length > 0 ? parsed : undefined;
 };
+const sanitizeString = (value: any) => {
+  if (value === undefined || value === null) return undefined;
+  return String(value).trim();
+};
 
 const toPort = (val: any) => {
   const num = Number(val);
@@ -221,15 +275,28 @@ const applyConfigUpdate = (current: any, next: any) => {
   updated.panel = { ...current.panel };
   updated.web = { ...current.web };
   updated.modbus = { ...current.modbus };
+  updated.bacnet = { ...current.bacnet };
+  updated.hostNetwork = { ...current.hostNetwork };
 
   if (next.panel?.panelIp || next.panelIp) updated.panel.panelIp = next.panel?.panelIp || next.panelIp;
   if (next.panel?.panelPort || next.panelPort) {
     const port = toPort(next.panel?.panelPort ?? next.panelPort);
     if (port) updated.panel.panelPort = port;
   }
-  if (next.panel?.panelPassword || next.panelPassword) updated.panel.panelPassword = next.panel?.panelPassword ?? next.panelPassword;
+  if (next.panel?.panelPassword !== undefined || next.panelPassword !== undefined) {
+    const panelPassword = sanitizeString(next.panel?.panelPassword ?? next.panelPassword);
+    if (panelPassword) updated.panel.panelPassword = panelPassword;
+  }
   if (next.panel?.panelId || next.panelId) updated.panel.panelId = next.panel?.panelId ?? next.panelId;
-  if (next.panel?.socketMode) updated.panel.socketMode = next.panel.socketMode;
+  if (next.panel?.socketMode !== undefined) {
+    const socketMode = sanitizeSocketMode(next.panel.socketMode);
+    if (socketMode) updated.panel.socketMode = socketMode;
+  }
+  if (next.panel?.watchDogInterval !== undefined) {
+    const num = Number(next.panel.watchDogInterval);
+    if (!Number.isNaN(num) && num > 0) updated.panel.watchDogInterval = num;
+  }
+  if (next.panel?.commandsLog !== undefined) updated.panel.commandsLog = !!next.panel.commandsLog;
   if (next.panel?.partitionCommandMode !== undefined) {
     const mode = sanitizePartitionCommandMode(next.panel.partitionCommandMode);
     if (mode) updated.panel.partitionCommandMode = mode;
@@ -257,6 +324,32 @@ const applyConfigUpdate = (current: any, next: any) => {
   if (next.modbus?.host) updated.modbus.host = next.modbus.host;
   if (next.modbus?.enable !== undefined) updated.modbus.enable = !!next.modbus.enable;
 
+  if (next.bacnet?.enable !== undefined) updated.bacnet.enable = !!next.bacnet.enable;
+  if (next.bacnet?.port !== undefined) {
+    const port = toPort(next.bacnet.port);
+    if (port) updated.bacnet.port = port;
+  }
+  if (next.bacnet?.interface !== undefined) updated.bacnet.interface = sanitizeString(next.bacnet.interface) || '0.0.0.0';
+  if (next.bacnet?.broadcastAddress !== undefined) updated.bacnet.broadcastAddress = sanitizeString(next.bacnet.broadcastAddress) || '255.255.255.255';
+  if (next.bacnet?.deviceId !== undefined) {
+    const num = Number(next.bacnet.deviceId);
+    if (Number.isInteger(num) && num >= 0 && num <= 4194302) updated.bacnet.deviceId = num;
+  }
+  if (next.bacnet?.deviceName !== undefined) updated.bacnet.deviceName = sanitizeString(next.bacnet.deviceName) || 'Risco Gateway BACnet';
+  if (next.bacnet?.vendorId !== undefined) {
+    const num = Number(next.bacnet.vendorId);
+    if (Number.isInteger(num) && num >= 0) updated.bacnet.vendorId = num;
+  }
+  if (next.bacnet?.allowWrite !== undefined) updated.bacnet.allowWrite = !!next.bacnet.allowWrite;
+  if (next.bacnet?.apduTimeout !== undefined) {
+    const num = Number(next.bacnet.apduTimeout);
+    if (Number.isInteger(num) && num >= 1000) updated.bacnet.apduTimeout = num;
+  }
+
+  if (next.hostNetwork?.interfaceAlias !== undefined) {
+    updated.hostNetwork.interfaceAlias = sanitizeString(next.hostNetwork.interfaceAlias) || '';
+  }
+
   if (next.log !== undefined) {
     const lvl = sanitizeLogLevel(next.log);
     if (lvl) updated.log = lvl;
@@ -270,20 +363,105 @@ const applyConfigUpdate = (current: any, next: any) => {
   return updated;
 };
 
-const PARTITION_REGS = 32; // 32 particiones
-const ZONE_REGS = 512;     // 512 zonas
+const PARTITION_REGS = 32;
+const ZONE_REGS = 512;
 const BYTES_PER_REG = 2;
 
 export function startWebServer(
   web: WebOptions,
   modbus: ModbusOptions,
+  bacnet: Partial<BacnetOptions> | undefined,
   state: RealtimeState,
   onArm: (partitionId: number, mode: 'away' | 'home' | 'disarm') => Promise<boolean>,
   onBypass?: (zoneId: number) => Promise<boolean>,
+  debugTools?: WebDebugTools,
 ) {
   const app = express();
   const httpServer = new HttpServer(app);
   const panelState: PanelState = state.panel || { online: false };
+  const startedAt = new Date();
+  let protocolEventSeq = 0;
+  const protocolEvents: ProtocolEvent[] = [];
+  const counters = {
+    armCommands: 0,
+    bypassCommands: 0,
+    modbusWrites: 0,
+    bacnetWhoIs: 0,
+    bacnetReads: 0,
+    bacnetWrites: 0,
+    bacnetErrors: 0,
+    partitionUpdates: 0,
+    zoneUpdates: 0,
+    panelOnlineChanges: 0,
+  };
+
+  const pushProtocolEvent = (type: string, message: string, detail?: any) => {
+    protocolEvents.push({
+      id: ++protocolEventSeq,
+      ts: new Date().toISOString(),
+      type,
+      message,
+      detail,
+    });
+    if (protocolEvents.length > 300) protocolEvents.splice(0, protocolEvents.length - 300);
+  };
+
+  const bacnetOptions = normalizeBacnetOptions(bacnet);
+  const bacnetServer = startBacnetServer(bacnetOptions, state, {
+    onWhoIs: () => {
+      counters.bacnetWhoIs++;
+      pushProtocolEvent('bacnet', 'Who-Is recibido');
+    },
+    onRead: () => { counters.bacnetReads++; },
+    onWrite: () => {
+      counters.bacnetWrites++;
+      pushProtocolEvent('bacnet-write', 'WriteProperty recibido');
+    },
+    onWriteValue: async ({ kind, instance, value }) => {
+      if (!panelState.online) {
+        pushProtocolEvent('bacnet-write', 'WriteProperty rechazado: panel offline', { kind, instance, value });
+        return false;
+      }
+
+      if (kind === 'partition-state') {
+        if (instance < 1 || instance > PARTITION_REGS) return false;
+        let mode: 'away' | 'disarm' | undefined;
+        if (value === 0) mode = 'disarm';
+        if (value === 1) mode = 'away';
+        if (!mode) {
+          pushProtocolEvent('bacnet-write', `WriteProperty particion ${instance} valor no controlable`, { value });
+          return false;
+        }
+        counters.armCommands++;
+        pushProtocolEvent('bacnet-write', `BACnet write partition=${instance} value=${value}`);
+        return onArm(instance, mode);
+      }
+
+      if (kind === 'zone-state') {
+        const zoneId = instance - PARTITION_REGS;
+        if (zoneId < 1 || zoneId > ZONE_REGS || !onBypass) return false;
+        if (value !== 0 && value !== 2) {
+          pushProtocolEvent('bacnet-write', `WriteProperty zona ${zoneId} valor no controlable`, { value });
+          return false;
+        }
+        const desiredBypass = value === 2;
+        const currentBypass = state.zones.get(zoneId)?.bypass ?? false;
+        if (desiredBypass === currentBypass) return true;
+        counters.bypassCommands++;
+        pushProtocolEvent('bacnet-write', `BACnet write zone=${zoneId} bypass=${desiredBypass}`);
+        return onBypass(zoneId);
+      }
+
+      return false;
+    },
+    onError: (message) => {
+      counters.bacnetErrors++;
+      pushProtocolEvent('bacnet-error', message);
+    },
+  });
+  if (bacnetOptions.enable) {
+    pushProtocolEvent('bacnet', `BACnet/IP habilitado en ${bacnetOptions.interface}:${bacnetOptions.port}`);
+  }
 
   ensureRuntimeDirectories();
   void ensureConfigFile();
@@ -298,13 +476,128 @@ export function startWebServer(
   const publicDir = runtimePaths.publicDir;
   console.log(`[WEB] Static dir: ${publicDir}`);
 
-  // Health (sin auth, usado por healthcheck)
-  app.get('/health', (_req, res) => res.json({ ok: true, uptimeSeconds: Math.round(process.uptime()) }));
+  app.get('/health', (_req, res) => res.json({ ok: true, uptimeSeconds: Math.floor(process.uptime()) }));
   app.get('/api/system/info', requireAuthJson, (_req, res) => {
     res.json({ ok: true, info: getPlatformInfo() });
   });
+  app.get('/api/supported-panels', requireAuthJson, (_req, res) => {
+    res.json({ ok: true, panels: SUPPORTED_PANELS });
+  });
+  app.get('/api/diagnostics', requireAuthJson, (_req, res) => {
+    const partitions = Array.from(state.partitions.values());
+    const zones = Array.from(state.zones.values());
+    res.json({
+      ok: true,
+      startedAt: startedAt.toISOString(),
+      uptimeSeconds: Math.floor(process.uptime()),
+      panelOnline: panelState.online,
+      counts: {
+        partitions: partitions.length,
+        zones: zones.length,
+        armedPartitions: partitions.filter((p) => p.status === 'armed_home' || p.status === 'armed_away').length,
+        readyPartitions: partitions.filter((p) => p.ready === true).length,
+        notReadyPartitions: partitions.filter((p) => p.ready === false).length,
+        openZones: zones.filter((z) => z.open).length,
+        bypassedZones: zones.filter((z) => z.bypass).length,
+      },
+      counters,
+      recentEvents: protocolEvents.slice(-80),
+      bacnet: bacnetServer.status(),
+      modbus,
+    });
+  });
+  app.get('/api/protocols/modbus', requireAuthJson, (_req, res) => {
+    const partitions = Array.from(state.partitions.values()).sort((a, b) => a.id - b.id);
+    const zones = Array.from(state.zones.values()).sort((a, b) => a.id - b.id);
+    res.json({
+      ok: true,
+      enabled: modbus.enable,
+      host: modbus.host,
+      port: modbus.port,
+      map: {
+        holdingRegisters: [
+          { range: '1-32', type: 'partition', values: '0=disarmed, 1=armed, 2=triggered, 3=ready, 4=not ready' },
+          { range: '33-544', type: 'zone', values: '0=closed, 1=open, 2=bypass' },
+        ],
+        discreteInputs: [
+          { range: '1-32', type: 'partition alarm', values: '0=normal, 1=alarm' },
+          { range: '33-544', type: 'zone open', values: '0=closed, 1=open' },
+        ],
+      },
+      current: {
+        partitions: partitions.map((p) => ({ register: p.id, id: p.id, value: encodePartitionHolding(p.status, p.ready), status: p.status, ready: p.ready })),
+        zones: zones.map((z) => ({ register: PARTITION_REGS + z.id, id: z.id, value: encodeZoneHolding(z.open, z.bypass), open: z.open, bypass: z.bypass, label: z.label })),
+      },
+    });
+  });
+  app.get('/api/protocols/bacnet', requireAuthJson, (_req, res) => {
+    const partitions = Array.from(state.partitions.values()).sort((a, b) => a.id - b.id);
+    const zones = Array.from(state.zones.values()).sort((a, b) => a.id - b.id);
+    res.json({
+      ok: true,
+      status: bacnetServer.status(),
+      map: buildBacnetMapSummary(bacnetOptions, state),
+      current: {
+        partitions: partitions.map((p) => ({ object: `AV${p.id}`, id: p.id, value: encodePartitionValue(p.status, p.ready), status: p.status, ready: p.ready })),
+        zones: zones.map((z) => ({ object: `AV${PARTITION_REGS + z.id}`, id: z.id, value: encodeZoneValue(z.open, z.bypass), open: z.open, bypass: z.bypass, label: z.label })),
+      },
+    });
+  });
+  app.get('/api/debug/capabilities', requireAuthJson, (_req, res) => {
+    res.json({
+      ok: true,
+      available: !!debugTools,
+      strategies: debugTools?.getAvailableStrategies() || [],
+      partitionCommandConfig: debugTools?.getPartitionCommandConfig() || {},
+    });
+  });
+  app.get('/api/debug/logs', requireAuthJson, (_req, res) => {
+    res.json({ ok: true, logs: debugTools?.getLogs() || [] });
+  });
+  app.post('/api/debug/partition/preview', requireAuthJson, (req, res) => {
+    if (!debugTools) return res.status(404).json({ ok: false, error: 'debug_not_available' });
+    const partitionId = Number(req.body?.partitionId);
+    const mode = req.body?.mode as 'away' | 'home' | 'disarm';
+    if (!partitionId || !['away', 'home', 'disarm'].includes(mode)) {
+      return res.status(400).json({ ok: false, error: 'invalid_payload' });
+    }
+    res.json({
+      ok: true,
+      attempts: debugTools.previewPartitionCommands(partitionId, mode),
+      partitionCommandConfig: debugTools.getPartitionCommandConfig(),
+    });
+  });
+  app.post('/api/debug/partition/execute', requireAuthJson, async (req, res) => {
+    if (!debugTools) return res.status(404).json({ ok: false, error: 'debug_not_available' });
+    const partitionId = Number(req.body?.partitionId);
+    const mode = req.body?.mode as 'away' | 'home' | 'disarm';
+    const strategy = sanitizePartitionCommandStrategy(req.body?.strategy);
+    if (!partitionId || !['away', 'home', 'disarm'].includes(mode)) {
+      return res.status(400).json({ ok: false, error: 'invalid_payload' });
+    }
+    try {
+      const result = await debugTools.executePartitionCommand(partitionId, mode, strategy);
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message || 'debug_execute_failed' });
+    }
+  });
+  app.post('/api/debug/partition/raw', requireAuthJson, async (req, res) => {
+    if (!debugTools) return res.status(404).json({ ok: false, error: 'debug_not_available' });
+    const partitionId = Number(req.body?.partitionId);
+    const mode = req.body?.mode as 'away' | 'home' | 'disarm';
+    const rawCommand = sanitizeString(req.body?.rawCommand);
+    if (!partitionId || !['away', 'home', 'disarm'].includes(mode) || !rawCommand) {
+      return res.status(400).json({ ok: false, error: 'invalid_payload' });
+    }
+    try {
+      const result = await debugTools.executeRawPartitionCommand(partitionId, mode, rawCommand);
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message || 'debug_raw_failed' });
+    }
+  });
 
-  // Auth
   app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body || {};
     if (!username || !password) return res.status(400).json({ ok: false, error: 'missing_credentials' });
@@ -359,7 +652,6 @@ export function startWebServer(
     res.json({ ok: true });
   });
 
-  // Config
   app.get('/api/config', requireAuthJson, async (_req, res) => {
     const cfg = await readConfig(true);
     res.json({ ok: true, config: cfg });
@@ -374,7 +666,7 @@ export function startWebServer(
 
   app.post('/api/restart', requireAuthJson, async (_req, res) => {
     res.json({ ok: true, restarting: true });
-    setTimeout(() => process.exit(0), 500);
+    requestManagedRestart();
   });
 
   app.post('/api/factory-reset', requireAuthJson, async (_req, res) => {
@@ -385,37 +677,27 @@ export function startWebServer(
     await fsp.writeFile(USERS_FILE, JSON.stringify(payload, null, 2));
     sessions.clear();
     res.json({ ok: true, needsRestart: true, restarting: true });
-    setTimeout(() => process.exit(0), 500);
+    requestManagedRestart();
   });
 
-  // Cambiar IP del host (Raspberry). Requiere script externo con sudo.
   app.post('/api/host/ip', requireAuthJson, async (req, res) => {
-    const { ip, cidr, gateway } = req.body || {};
+    const { ip, cidr, gateway, interfaceAlias } = req.body || {};
     if (!ip || !cidr || !gateway) return res.status(400).json({ ok: false, error: 'missing_fields' });
     if (!isValidIp(ip) || !isValidIp(gateway) || !isValidCidr(cidr)) {
       return res.status(400).json({ ok: false, error: 'invalid_ip' });
     }
-    if (!fs.existsSync(HOST_IP_SCRIPT)) {
+    const cfg = await readConfig(false);
+    const requestedInterface = sanitizeString(interfaceAlias) || sanitizeString(cfg.hostNetwork?.interfaceAlias);
+    if (!scheduleHostIpChange({ ip, cidr: Number(cidr), gateway, interfaceAlias: requestedInterface })) {
       return res.status(501).json({ ok: false, error: 'host_ip_not_supported' });
     }
 
-    // Importante: si cambias la IP mientras navegas en /config, la conexión HTTP se corta.
-    // Responde rápido y aplica el cambio en background.
     res.json({ ok: true, applying: true, restarting: true });
-
-    const args = [HOST_IP_SCRIPT, ip, String(cidr), gateway];
-    const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
-    const cmd = isRoot ? HOST_IP_SCRIPT : 'sudo';
-    const cmdArgs = isRoot ? [ip, String(cidr), gateway] : args;
-
     setTimeout(() => {
-      const child = spawn(cmd, cmdArgs, { detached: true, stdio: 'ignore' });
-      child.unref();
-      setTimeout(() => process.exit(0), 750);
-    }, 250);
+      requestManagedRestart();
+    }, 750);
   });
 
-  // Datos en tiempo real
   app.get('/snapshot', requireAuthJson, (_req, res) => {
     res.json({
       panelOnline: panelState.online,
@@ -424,10 +706,8 @@ export function startWebServer(
     });
   });
 
-  // Assets
   app.use(express.static(publicDir, { index: false }));
 
-  // WebSocket
   const wss = new WebSocketServer({ server: httpServer, path: web.ws_path });
   const broadcast = (msg: any) => {
     const data = JSON.stringify(msg);
@@ -452,10 +732,14 @@ export function startWebServer(
       try {
         const msg = JSON.parse(data.toString());
         if (msg.type === 'arm' && msg.partitionId && msg.mode) {
+          counters.armCommands++;
+          pushProtocolEvent('command', `Web arm command partition=${Number(msg.partitionId)} mode=${msg.mode}`);
           const ok = await onArm(Number(msg.partitionId), msg.mode);
           const message = ok ? '' : (panelState.online ? 'Operacion rechazada' : 'Panel offline');
           ws.send(JSON.stringify({ type: 'ack', action: 'arm', ok, partitionId: Number(msg.partitionId), message }));
         } else if (msg.type === 'bypass' && msg.zoneId && onBypass) {
+          counters.bypassCommands++;
+          pushProtocolEvent('command', `Web bypass toggle zone=${Number(msg.zoneId)}`);
           const ok = await onBypass(Number(msg.zoneId));
           const message = ok ? '' : (panelState.online ? 'Operacion rechazada' : 'Panel offline');
           ws.send(JSON.stringify({ type: 'ack', action: 'bypass', ok, zoneId: Number(msg.zoneId), message }));
@@ -466,9 +750,12 @@ export function startWebServer(
     });
   });
 
-  // Rutas HTML
   app.get('/login', (_req, res) => res.sendFile(path.join(publicDir, 'login.html')));
   app.get('/config', requireAuthHtml, (_req, res) => res.sendFile(path.join(publicDir, 'config.html')));
+  app.get('/debug', requireAuthHtml, (_req, res) => res.sendFile(path.join(publicDir, 'debug.html')));
+  app.get('/diagnostics', requireAuthHtml, (_req, res) => res.sendFile(path.join(publicDir, 'diagnostics.html')));
+  app.get('/modbus', requireAuthHtml, (_req, res) => res.sendFile(path.join(publicDir, 'modbus.html')));
+  app.get('/bacnet', requireAuthHtml, (_req, res) => res.sendFile(path.join(publicDir, 'bacnet.html')));
   app.get('/', requireAuthHtml, (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
   app.get('*', requireAuthHtml, (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
@@ -476,7 +763,6 @@ export function startWebServer(
     console.log(`[WEB] HTTP/WS listening on ${web.http_port}${web.ws_path}`);
   });
 
-  // Modbus TCP (jsmodbus ModbusTCPServer expects net.Server como primer argumento)
   if (modbus.enable) {
     const totalRegs = PARTITION_REGS + ZONE_REGS;
     const holding = Buffer.alloc(totalRegs * BYTES_PER_REG);
@@ -514,13 +800,14 @@ export function startWebServer(
 
     const handleWriteRegisters = async (startAddress: number, values: number[]) => {
       for (let i = 0; i < values.length; i++) {
-        const regIndex = startAddress + i; // base 0
+        const regIndex = startAddress + i;
         const val = values[i];
         if (regIndex < PARTITION_REGS) {
           const partitionId = regIndex + 1;
-          // Solo permitimos 0=disarm, 1=arm away (full). Ignoramos 2 (home) para este proyecto.
           if (val === 0 || val === 1) {
             const mode: 'disarm' | 'home' | 'away' = val === 0 ? 'disarm' : 'away';
+            counters.armCommands++;
+            pushProtocolEvent('modbus-write', `Modbus write partition=${partitionId} value=${val}`);
             const ok = await onArm(partitionId, mode);
             const current = state.partitions.get(partitionId);
             if (!ok && current) writePartition(current);
@@ -531,6 +818,8 @@ export function startWebServer(
             const desiredBypass = val === 2;
             const current = state.zones.get(zoneId)?.bypass ?? false;
             if (desiredBypass !== current && onBypass) {
+              counters.bypassCommands++;
+              pushProtocolEvent('modbus-write', `Modbus write zone=${zoneId} bypass=${desiredBypass}`);
               const ok = await onBypass(zoneId);
               const zone = state.zones.get(zoneId);
               if (!ok && zone) writeZone(zone);
@@ -541,10 +830,12 @@ export function startWebServer(
     };
 
     modbusServer.on('postWriteSingleRegister', async (req: any) => {
+      counters.modbusWrites++;
       const value = req.body.value;
       await handleWriteRegisters(req.body.address, [value]);
     });
     modbusServer.on('postWriteMultipleRegisters', async (req: any) => {
+      counters.modbusWrites++;
       const vals: number[] = [];
       for (let i = 0; i < req.body.values.length; i += 2) {
         vals.push(req.body.values.readUInt16BE(i));
@@ -560,62 +851,73 @@ export function startWebServer(
       broadcast,
       updatePartition: (p: PartitionState) => {
         state.partitions.set(p.id, p);
+        counters.partitionUpdates++;
+        pushProtocolEvent('partition', `Partition ${p.id} ${p.status}`, { ready: p.ready });
         writePartition(p);
         broadcast({ type: 'partition', data: p });
       },
       updateZone: (z: ZoneState) => {
         state.zones.set(z.id, z);
+        counters.zoneUpdates++;
+        pushProtocolEvent('zone', `Zone ${z.id} ${z.open ? 'open' : 'closed'}`, { bypass: z.bypass, label: z.label });
         writeZone(z);
         broadcast({ type: 'zone', data: z });
       },
       updatePanelStatus: (online: boolean) => {
+        if (panelState.online !== online) {
+          counters.panelOnlineChanges++;
+          pushProtocolEvent('panel', `Panel ${online ? 'online' : 'offline'}`);
+        }
         panelState.online = online;
         broadcast({ type: 'panel', online });
+      },
+      pushLog: (entry: DebugLogEntry) => {
+        broadcast({ type: 'log', data: entry });
       },
       stop: () => {
         wss.clients.forEach((c) => c.terminate());
         wss.close();
         httpServer.close();
         modbusNetServer.close();
+        bacnetServer.stop();
       },
     };
   }
 
-  // Sin Modbus
   return {
     broadcast,
     updatePartition: (p: PartitionState) => {
       state.partitions.set(p.id, p);
+      counters.partitionUpdates++;
+      pushProtocolEvent('partition', `Partition ${p.id} ${p.status}`, { ready: p.ready });
       broadcast({ type: 'partition', data: p });
     },
     updateZone: (z: ZoneState) => {
       state.zones.set(z.id, z);
+      counters.zoneUpdates++;
+      pushProtocolEvent('zone', `Zone ${z.id} ${z.open ? 'open' : 'closed'}`, { bypass: z.bypass, label: z.label });
       broadcast({ type: 'zone', data: z });
     },
     updatePanelStatus: (online: boolean) => {
+      if (panelState.online !== online) {
+        counters.panelOnlineChanges++;
+        pushProtocolEvent('panel', `Panel ${online ? 'online' : 'offline'}`);
+      }
       panelState.online = online;
       broadcast({ type: 'panel', online });
+    },
+    pushLog: (entry: DebugLogEntry) => {
+      broadcast({ type: 'log', data: entry });
     },
     stop: () => {
       wss.clients.forEach((c) => c.terminate());
       wss.close();
       httpServer.close();
+      bacnetServer.stop();
     },
   };
 }
 
-// codifica estado de particion en holding register
-function encodePartition(status: string): number {
-  switch (status) {
-    case 'armed_away': return 2;
-    case 'armed_home': return 1;
-    case 'triggered': return 3;
-    case 'disarmed':
-    default: return 0;
-  }
-}
-
-// Holding register: 0=desarmada, 1=armada (home/away), 2=alarmada/triggered, 3=Ready (desarmada), 4=NotReady (desarmada)
 function encodePartitionHolding(status: string, ready?: boolean): number {
   if (status === 'triggered') return 2;
   if (ready === true) return 3;
@@ -624,7 +926,6 @@ function encodePartitionHolding(status: string, ready?: boolean): number {
   return 0;
 }
 
-// Holding zone: 0=cerrada/normal, 1=abierta/alarmada, 2=bypass
 function encodeZoneHolding(open: boolean, bypass: boolean): number {
   if (bypass) return 2;
   return open ? 1 : 0;

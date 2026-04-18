@@ -3,6 +3,12 @@ const passMsg = document.getElementById('pass-msg');
 const logoutBtn = document.getElementById('logout-btn');
 const platformMsg = document.getElementById('platform-msg');
 const serviceMsg = document.getElementById('service-msg');
+const saveBtn = document.getElementById('save-btn');
+const saveRestartBtn = document.getElementById('save-restart-btn');
+const restartBtn = document.getElementById('restart-btn');
+const factoryBtn = document.getElementById('factory-btn');
+const applyHostIpBtn = document.getElementById('apply-host-ip');
+const changePassBtn = document.getElementById('change-pass-btn');
 
 const setStatus = (msg, ok = true) => {
   if (!statusMsg) return;
@@ -13,6 +19,12 @@ const setPassStatus = (msg, ok = true) => {
   if (!passMsg) return;
   passMsg.textContent = msg;
   passMsg.style.color = ok ? '#94a3b8' : '#fca5a5';
+};
+
+const setBusy = (busy) => {
+  [saveBtn, saveRestartBtn, restartBtn, factoryBtn, applyHostIpBtn, changePassBtn]
+    .filter(Boolean)
+    .forEach((el) => { el.disabled = busy; });
 };
 
 const handleUnauthorized = (res) => {
@@ -29,27 +41,36 @@ const fillConfig = (cfg) => {
   const maskedPanelPass = cfg.panel?.panelPassword === '***' ? '' : (cfg.panel?.panelPassword || '');
   document.getElementById('panelPassword').value = maskedPanelPass;
   document.getElementById('panelId').value = cfg.panel?.panelId || '';
+  document.getElementById('socketMode').value = cfg.panel?.socketMode || 'direct';
+  document.getElementById('watchDogInterval').value = cfg.panel?.watchDogInterval || 5000;
+  document.getElementById('commandsLog').checked = !!cfg.panel?.commandsLog;
   document.getElementById('partitionCommandMode').value = cfg.panel?.partitionCommandMode || 'fixed';
-  document.getElementById('partitionCommandStrategy').value = cfg.panel?.partitionCommandStrategy || 'equals_star_decimal';
+  document.getElementById('partitionCommandStrategy').value = cfg.panel?.partitionCommandStrategy || 'p_suffix_equals_plain';
   document.getElementById('partitionCommandProbeOrder').value = Array.isArray(cfg.panel?.partitionCommandProbeOrder)
     ? cfg.panel.partitionCommandProbeOrder.join(',')
-    : (cfg.panel?.partitionCommandProbeOrder || 'equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,p_suffix_equals_plain,p_suffix_equals_zero_pad_3,p_suffix_colon_decimal,p_suffix_colon_zero_pad_3,p_suffix_equals_hex_zero_pad_2,equals_plain');
+    : (cfg.panel?.partitionCommandProbeOrder || 'p_suffix_equals_plain');
+  document.getElementById('webEnable').checked = cfg.web?.enable !== false;
   document.getElementById('webPort').value = cfg.web?.http_port || '';
   document.getElementById('wsPath').value = cfg.web?.ws_path || '';
+  document.getElementById('modbusEnable').checked = cfg.modbus?.enable !== false;
   document.getElementById('modbusHost').value = cfg.modbus?.host || '';
   document.getElementById('modbusPort').value = cfg.modbus?.port || '';
   document.getElementById('logLevel').value = cfg.log || 'info';
   document.getElementById('logColorize').checked = !!cfg.logColorize;
   document.getElementById('heartbeatMs').value = cfg.heartbeat_interval_ms ?? 0;
+  document.getElementById('hostInterfaceAlias').value = cfg.hostNetwork?.interfaceAlias || '';
 };
 
 const fillSystemInfo = (info) => {
   if (platformMsg) {
-    platformMsg.textContent = `Plataforma: ${info.platform} | Node: ${info.nodeVersion} | Version app: ${info.appVersion}`;
+    platformMsg.textContent = `Version: ${info.appVersion} | Plataforma: ${info.platform} | Node: ${info.nodeVersion} | Data dir: ${info.dataDir}`;
   }
   if (serviceMsg) {
-    const hostIpState = info.hostIpSupported ? 'Cambio de IP disponible' : 'Cambio de IP no disponible';
-    serviceMsg.textContent = `Config: ${info.configPath} | Data: ${info.dataDir} | Uptime: ${info.uptimeSeconds}s | ${hostIpState}`;
+    const hostIpState = info.hostIpSupported ? 'Cambio de IP del host disponible' : 'Cambio de IP del host no disponible';
+    serviceMsg.textContent = `Modo de servicio: ${info.serviceMode} | Supervisado: ${info.supervised ? 'si' : 'no'} | Uptime: ${Math.floor(info.uptimeSeconds || 0)} s | ${hostIpState}`;
+  }
+  if (applyHostIpBtn && !info.hostIpSupported) {
+    applyHostIpBtn.disabled = true;
   }
 };
 
@@ -86,6 +107,9 @@ const gatherConfig = () => ({
     panelPort: Number(document.getElementById('panelPort').value),
     panelPassword: document.getElementById('panelPassword').value,
     panelId: document.getElementById('panelId').value,
+    socketMode: document.getElementById('socketMode').value,
+    watchDogInterval: Number(document.getElementById('watchDogInterval').value || 5000),
+    commandsLog: document.getElementById('commandsLog').checked,
     partitionCommandMode: document.getElementById('partitionCommandMode').value,
     partitionCommandStrategy: document.getElementById('partitionCommandStrategy').value,
     partitionCommandProbeOrder: document.getElementById('partitionCommandProbeOrder').value
@@ -94,12 +118,17 @@ const gatherConfig = () => ({
       .filter(Boolean),
   },
   web: {
+    enable: document.getElementById('webEnable').checked,
     http_port: Number(document.getElementById('webPort').value),
     ws_path: document.getElementById('wsPath').value,
   },
   modbus: {
+    enable: document.getElementById('modbusEnable').checked,
     host: document.getElementById('modbusHost').value,
     port: Number(document.getElementById('modbusPort').value),
+  },
+  hostNetwork: {
+    interfaceAlias: document.getElementById('hostInterfaceAlias').value,
   },
   log: document.getElementById('logLevel').value,
   logColorize: document.getElementById('logColorize').checked,
@@ -108,6 +137,7 @@ const gatherConfig = () => ({
 
 const saveConfig = async (restartAfter = false) => {
   try {
+    setBusy(true);
     setStatus('Guardando...', true);
     const payload = gatherConfig();
     const res = await fetch('/api/config', {
@@ -124,6 +154,8 @@ const saveConfig = async (restartAfter = false) => {
   } catch (e) {
     console.error(e);
     setStatus('No se pudo guardar la config', false);
+  } finally {
+    setBusy(false);
   }
 };
 
@@ -131,16 +163,18 @@ const applyHostIp = async () => {
   const ip = document.getElementById('hostIp').value;
   const cidr = document.getElementById('hostCidr').value;
   const gateway = document.getElementById('hostGw').value;
+  const interfaceAlias = document.getElementById('hostInterfaceAlias').value;
   if (!ip || !cidr || !gateway) {
     setStatus('Completa IP/CIDR/Gateway', false);
     return;
   }
   try {
+    setBusy(true);
     setStatus('Aplicando IP del gateway...', true);
     const res = await fetch('/api/host/ip', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip, cidr, gateway }),
+      body: JSON.stringify({ ip, cidr, gateway, interfaceAlias }),
     });
     if (handleUnauthorized(res)) return;
     if (res.status === 501) {
@@ -157,11 +191,14 @@ const applyHostIp = async () => {
   } catch (e) {
     console.error(e);
     setStatus('No se pudo aplicar la IP del gateway', false);
+  } finally {
+    setBusy(false);
   }
 };
 
 const restartService = async () => {
   try {
+    setBusy(true);
     const res = await fetch('/api/restart', { method: 'POST' });
     if (handleUnauthorized(res)) return;
     if (!res.ok) throw new Error('restart_failed');
@@ -170,6 +207,8 @@ const restartService = async () => {
   } catch (e) {
     console.error(e);
     setStatus('No se pudo reiniciar el servicio', false);
+  } finally {
+    setBusy(false);
   }
 };
 
@@ -177,6 +216,7 @@ const factoryReset = async () => {
   const sure = confirm('Esto restablece config y usuario admin (Admin123). Continuar?');
   if (!sure) return;
   try {
+    setBusy(true);
     const res = await fetch('/api/factory-reset', { method: 'POST' });
     if (handleUnauthorized(res)) return;
     if (!res.ok) throw new Error('factory_failed');
@@ -184,7 +224,9 @@ const factoryReset = async () => {
     setTimeout(() => window.location.href = '/login', 1500);
   } catch (e) {
     console.error(e);
-    setStatus('No se pudo restablecer a f\u00e1brica', false);
+    setStatus('No se pudo restablecer a fabrica', false);
+  } finally {
+    setBusy(false);
   }
 };
 
@@ -193,10 +235,11 @@ const changePassword = async () => {
   const next = document.getElementById('newPassword').value;
   const confirm = document.getElementById('confirmPassword').value;
   if (next !== confirm) {
-    setPassStatus('Las contrase\u00f1as no coinciden', false);
+    setPassStatus('Las contrasenas no coinciden', false);
     return;
   }
   try {
+    setBusy(true);
     const res = await fetch('/api/auth/password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -204,23 +247,29 @@ const changePassword = async () => {
     });
     if (handleUnauthorized(res)) return;
     if (res.status === 401) {
-      setPassStatus('Contrase\u00f1a actual no v\u00e1lida', false);
+      setPassStatus('Contrasena actual no valida', false);
       return;
     }
     if (!res.ok) throw new Error('pass_failed');
-    setPassStatus('Contrase\u00f1a actualizada', true);
+    setPassStatus('Contrasena actualizada', true);
     document.getElementById('currentPassword').value = '';
     document.getElementById('newPassword').value = '';
     document.getElementById('confirmPassword').value = '';
   } catch (e) {
     console.error(e);
-    setPassStatus('No se pudo actualizar la contrase\u00f1a', false);
+    setPassStatus('No se pudo actualizar la contrasena', false);
+  } finally {
+    setBusy(false);
   }
 };
 
 if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) { /* ignore */ }
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (_) {
+      // ignore
+    }
     window.location.href = '/login';
   });
 }
@@ -254,5 +303,7 @@ document.getElementById('apply-host-ip')?.addEventListener('click', (e) => {
   applyHostIp();
 });
 
-window.addEventListener('DOMContentLoaded', loadConfig);
-window.addEventListener('DOMContentLoaded', loadSystemInfo);
+window.addEventListener('DOMContentLoaded', () => {
+  loadConfig();
+  loadSystemInfo();
+});

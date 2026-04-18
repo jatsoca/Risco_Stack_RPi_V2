@@ -13,6 +13,17 @@
     "port": 502,
     "host": "0.0.0.0"
   },
+  "bacnet": {
+    "enable": false,
+    "port": 47808,
+    "interface": "0.0.0.0",
+    "broadcastAddress": "255.255.255.255",
+    "deviceId": 432001,
+    "deviceName": "Risco Gateway BACnet",
+    "vendorId": 999,
+    "allowWrite": false,
+    "apduTimeout": 3000
+  },
   "panel": {
     "panelIp": "172.16.85.2",
     "panelPort": 1000,
@@ -21,21 +32,14 @@
     "socketMode": "direct",
     "watchDogInterval": 5000,
     "commandsLog": true,
-    "partitionCommandMode": "probe",
-    "partitionCommandStrategy": "equals_star_decimal",
+    "partitionCommandMode": "fixed",
+    "partitionCommandStrategy": "p_suffix_equals_plain",
     "partitionCommandProbeOrder": [
-      "equals_star_decimal",
-      "colon_decimal",
-      "colon_zero_pad_3",
-      "equals_zero_pad_3",
-      "equals_hex_zero_pad_2",
-      "p_suffix_equals_plain",
-      "p_suffix_equals_zero_pad_3",
-      "p_suffix_colon_decimal",
-      "p_suffix_colon_zero_pad_3",
-      "p_suffix_equals_hex_zero_pad_2",
-      "equals_plain"
+      "p_suffix_equals_plain"
     ]
+  },
+  "hostNetwork": {
+    "interfaceAlias": ""
   },
   "zones": {
     "default": {

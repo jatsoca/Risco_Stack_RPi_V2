@@ -37,6 +37,15 @@ const dataSeparator = `${String.fromCharCode(3)}${String.fromCharCode(2)}`;
 
 export type SocketMode = 'direct' | 'proxy'
 
+const isSensitiveCommand = (commandStr?: string) => /^(RMT|RPASS|PASS|PWD)=/i.test(commandStr || '');
+const redactCommand = (commandStr?: string) => {
+  if (!commandStr) return commandStr || '';
+  return commandStr.replace(/^(RMT|RPASS|PASS|PWD)=.*/i, '$1=***');
+};
+const redactBuffer = (commandStr: string | undefined, buffer: Buffer | undefined, bufferText: string) => (
+  isSensitiveCommand(commandStr) && buffer ? '[redacted-sensitive-buffer]' : bufferText
+);
+
 export abstract class RiscoBaseSocket extends TypedEmitter<RiscoSocketEvents> {
 
   protected socketTimeout: number;
@@ -201,11 +210,11 @@ export abstract class RiscoBaseSocket extends TypedEmitter<RiscoSocketEvents> {
   async sendCommand(commandStr: string, progCmd = false, forceEncryption: boolean | undefined = undefined, cmdCtx?: CommandContext): Promise<string> {
     assertIsDefined(this.panelSocket, `panelSocket`, `sendCommand(${commandStr}): socket is undefined`);
     if (this.panelSocket.destroyed) {
-      logger.log('warn', `sendCommand(${commandStr}): Socket is destroyed, ignoring command`);
+      logger.log('warn', `sendCommand(${redactCommand(commandStr)}): Socket is destroyed, ignoring command`);
       return '';
     }
     if (!this.isPanelSocketConnected) {
-      logger.log('warn', `sendCommand(${commandStr}): Socket not connected, ignoring command`);
+      logger.log('warn', `sendCommand(${redactCommand(commandStr)}): Socket not connected, ignoring command`);
       return '';
     }
 
@@ -242,7 +251,7 @@ export abstract class RiscoBaseSocket extends TypedEmitter<RiscoSocketEvents> {
       responseTimeoutDelay = 5000;
     }
 
-    logger.log('verbose', `Command[${cmdId}] Sending Command: ${commandStr}`);
+    logger.log('verbose', `Command[${cmdId}] Sending Command: ${redactCommand(commandStr)}`);
     const responseHandler = (_: string) => {
       waitResponse = false;
       shouldRetry = false;
@@ -259,16 +268,16 @@ export abstract class RiscoBaseSocket extends TypedEmitter<RiscoSocketEvents> {
       this.commandResponseEmitter.on(`CmdResponse_${cmdId}`, responseHandler);
 
       const encryptedCmdBuffer = this.rCrypt.getCommandBuffer(commandStr, cmdId, forceEncryption);
-      logger.log('debug', `[RAW->PANEL] id=${cmdId} cmd=${commandStr} buf=${this.bufferAsString(encryptedCmdBuffer)} forceEnc=${forceEncryption ?? 'auto'}`);
+      logger.log('debug', `[RAW->PANEL] id=${cmdId} cmd=${redactCommand(commandStr)} buf=${redactBuffer(commandStr, encryptedCmdBuffer, this.bufferAsString(encryptedCmdBuffer))} forceEnc=${forceEncryption ?? 'auto'}`);
 
       this.panelSocket.write(encryptedCmdBuffer);
       cmdCtx.sentBuffer = encryptedCmdBuffer;
 
-      logger.log('debug', `Command[${cmdId}] Writing command buffer to socket: ${this.bufferAsString(encryptedCmdBuffer)}`);
-      this.emit('DataSent', this.currentCommandId, commandStr);
+      logger.log('debug', `Command[${cmdId}] Writing command buffer to socket: ${redactBuffer(commandStr, encryptedCmdBuffer, this.bufferAsString(encryptedCmdBuffer))}`);
+      this.emit('DataSent', this.currentCommandId, redactCommand(commandStr));
 
       const responseTimeout = setTimeout(() => {
-        logger.log('warn', `Command[${cmdId}] '${commandStr}' Timeout`);
+        logger.log('warn', `Command[${cmdId}] '${redactCommand(commandStr)}' Timeout`);
         isTimedOut = true;
         shouldRetry = true;
       }, responseTimeoutDelay);
@@ -301,7 +310,7 @@ export abstract class RiscoBaseSocket extends TypedEmitter<RiscoSocketEvents> {
   }
 
   protected traceCommand(cmdCtx: CommandContext) {
-    this.commandsStream?.write(`${new Date().toISOString()}|${cmdCtx.panelId}|${cmdCtx.attempts}|${cmdCtx.commandId}|${cmdCtx.commandStr}|${this.bufferAsString(cmdCtx.sentBuffer)}|${cmdCtx.crcOk}|${cmdCtx.receivedStr}|${this.bufferAsString(cmdCtx.receivedBuffer)}\n`);
+    this.commandsStream?.write(`${new Date().toISOString()}|${cmdCtx.panelId}|${cmdCtx.attempts}|${cmdCtx.commandId}|${redactCommand(cmdCtx.commandStr)}|${redactBuffer(cmdCtx.commandStr, cmdCtx.sentBuffer, this.bufferAsString(cmdCtx.sentBuffer))}|${cmdCtx.crcOk}|${cmdCtx.receivedStr}|${this.bufferAsString(cmdCtx.receivedBuffer)}\n`);
   }
 
   /*
@@ -551,7 +560,7 @@ export abstract class RiscoBaseSocket extends TypedEmitter<RiscoSocketEvents> {
           const foundPassword = await this.guessPassword();
           this.inPasswordGuess = false;
           if (foundPassword !== null) {
-            logger.log('info', `Discovered Access Code : ${foundPassword}`);
+            logger.log('info', `Discovered Access Code : ***`);
             this.socketOptions.panelPassword = foundPassword;
             authenticationOk = true;
           } else {

@@ -1,15 +1,19 @@
 import merge from 'lodash/merge';
 import {
+  buildPartitionCommandFromStrategy,
+  DEFAULT_PARTITION_COMMAND_PROBE_ORDER,
   RiscoPanel,
   RiscoLogger,
   Partition,
   PartitionList,
+  PartitionCommandStrategy,
   Zone,
   ZoneList,
   PanelOptions,
 } from '@jatsoca/risco-bridge';
 import pkg from 'winston';
-import { startWebServer, RealtimeState } from '../web/server';
+import { DebugLogEntry, startWebServer, RealtimeState } from '../web/server';
+import { BacnetOptions } from './bacnet';
 
 const { createLogger, format, transports } = pkg;
 const { combine, timestamp, printf, colorize } = format;
@@ -31,6 +35,7 @@ export interface RiscoConfig {
     port?: number,
     host?: string,
   },
+  bacnet?: Partial<BacnetOptions>,
   zones?: {
     default?: ZoneConfig
     [label: string]: ZoneConfig
@@ -59,6 +64,17 @@ const CONFIG_DEFAULTS: RiscoConfig = {
     enable: true,
     port: 502,
     host: '0.0.0.0',
+  },
+  bacnet: {
+    enable: false,
+    port: 47808,
+    interface: '0.0.0.0',
+    broadcastAddress: '255.255.255.255',
+    deviceId: 432001,
+    deviceName: 'Risco Gateway BACnet',
+    vendorId: 999,
+    allowWrite: false,
+    apduTimeout: 3000,
   },
   panel: {},
   zones: {
@@ -104,12 +120,44 @@ export function startGateway(userConfig: RiscoConfig) {
     ],
   });
 
-  logger.debug(`User config:\n${JSON.stringify(userConfig, null, 2)}`);
-  logger.debug(`Merged config:\n${JSON.stringify({ ...config, panel: { ...config.panel, panelPassword: '***' } }, null, 2)}`);
+  const maskConfigForLog = (cfg: any) => ({
+    ...cfg,
+    panel: {
+      ...(cfg?.panel || {}),
+      panelPassword: cfg?.panel?.panelPassword !== undefined ? '***' : undefined,
+      panelPassword2: cfg?.panel?.panelPassword2 !== undefined ? '***' : undefined,
+    },
+  });
+  logger.debug(`User config:\n${JSON.stringify(maskConfigForLog(userConfig), null, 2)}`);
+  logger.debug(`Merged config:\n${JSON.stringify(maskConfigForLog(config), null, 2)}`);
+
+  let webHooks: ReturnType<typeof startWebServer> | null = null;
+  const debugLogs: DebugLogEntry[] = [];
+  let debugLogSeq = 0;
+  const pushDebugLog = (level: LogLevel, source: string, message: string) => {
+    const entry: DebugLogEntry = {
+      id: ++debugLogSeq,
+      ts: new Date().toISOString(),
+      level,
+      source,
+      message,
+    };
+    debugLogs.push(entry);
+    if (debugLogs.length > 500) {
+      debugLogs.splice(0, debugLogs.length - 500);
+    }
+    webHooks?.pushLog?.(entry);
+  };
+  const gatewayLog = (level: LogLevel, message: string) => {
+    logger.log(level, message);
+    pushDebugLog(level, 'gateway', message);
+  };
 
   class WinstonRiscoLogger implements RiscoLogger {
     log(log_lvl: LogLevel, log_data: any) {
-      logger.log(log_lvl, log_data);
+      const message = typeof log_data === 'string' ? log_data : JSON.stringify(log_data);
+      logger.log(log_lvl, message);
+      pushDebugLog(log_lvl, 'bridge', message);
     }
   }
 
@@ -121,7 +169,6 @@ export function startGateway(userConfig: RiscoConfig) {
   const panel = new RiscoPanel(config.panel);
 
   const rtState: RealtimeState = { partitions: new Map(), zones: new Map(), panel: { online: false } };
-  let webHooks: ReturnType<typeof startWebServer> | null = null;
 
   // Arranca Web/Modbus aunque el panel no esté conectado
   function ensureWebStarted() {
@@ -136,28 +183,59 @@ export function startGateway(userConfig: RiscoConfig) {
         port: config.modbus?.port ?? 502,
         host: config.modbus?.host || '0.0.0.0',
       },
+      config.bacnet,
       rtState,
       async (partitionId, mode) => {
         if (!panelReady) return false;
-        logger.info(`[CMD => Panel][web/modbus] partition ${partitionId} mode=${mode}`);
+        gatewayLog('info', `[CMD => Panel][web/modbus] partition ${partitionId} mode=${mode}`);
         let ok = false;
         if (mode === 'disarm') ok = await panel.disarmPart(partitionId);
         else if (mode === 'home') ok = await panel.armHome(partitionId);
         else if (mode === 'away') ok = await panel.armAway(partitionId);
-        logger.info(`[CMD => Panel][web/modbus] partition ${partitionId} result=${ok}`);
+        gatewayLog('info', `[CMD => Panel][web/modbus] partition ${partitionId} result=${ok}`);
         return ok;
       },
       async (zoneId) => {
         if (!panelReady) return false;
         try {
-          logger.info(`[CMD => Panel][web/modbus] toggle bypass zone ${zoneId}`);
+          gatewayLog('info', `[CMD => Panel][web/modbus] toggle bypass zone ${zoneId}`);
           await panel.toggleBypassZone(zoneId);
           return true;
         } catch (e) {
-          logger.error(`[WEB => Panel] Error toggling bypass zone ${zoneId}: ${e}`);
+          gatewayLog('error', `[WEB => Panel] Error toggling bypass zone ${zoneId}: ${e}`);
           return false;
         }
-      }
+      },
+      {
+        getLogs: () => [...debugLogs],
+        getAvailableStrategies: () => panel.getAvailablePartitionCommandStrategies(),
+        getPartitionCommandConfig: () => panel.riscoComm.getPartitionCommandConfig(),
+        previewPartitionCommands: (partitionId, mode) => {
+          const verb = mode === 'away' ? 'ARM' : mode === 'home' ? 'STAY' : 'DISARM';
+          const cfg = panel.riscoComm.getPartitionCommandConfig();
+          const strategies = partitionId >= 10 && cfg.mode === 'probe'
+            ? cfg.probeOrder
+            : [cfg.strategy || DEFAULT_PARTITION_COMMAND_PROBE_ORDER[0]];
+          return [...new Set(strategies)].map((strategy: PartitionCommandStrategy) => ({
+            strategy,
+            rawCommand: buildPartitionCommandFromStrategy(verb, partitionId, strategy),
+          }));
+        },
+        executePartitionCommand: async (partitionId, mode, strategy) => {
+          if (!panelReady || !panel.partitions) {
+            throw new Error('panel_offline');
+          }
+          gatewayLog('info', `[DEBUG] Execute partition test partition=${partitionId} mode=${mode} strategy=${strategy || 'current'}`);
+          return panel.debugPartitionCommand(partitionId, mode, strategy as any);
+        },
+        executeRawPartitionCommand: async (partitionId, mode, rawCommand) => {
+          if (!panelReady || !panel.partitions) {
+            throw new Error('panel_offline');
+          }
+          gatewayLog('info', `[DEBUG] Execute raw partition test partition=${partitionId} mode=${mode} raw='${rawCommand}'`);
+          return panel.debugRawPartitionCommand(partitionId, mode, rawCommand);
+        },
+      },
     );
     webHooks.updatePanelStatus(false);
   }
@@ -197,7 +275,7 @@ export function startGateway(userConfig: RiscoConfig) {
     const ready = getPartitionReady(partition);
     rtState.partitions.set(partition.Id, { id: partition.Id, status: alarmPayload(partition), ready });
     webHooks?.updatePartition({ id: partition.Id, status: alarmPayload(partition), ready });
-    logger.info(`[Panel => STATE] Ready=${ready} partition ${partition.Id}`);
+    gatewayLog('info', `[Panel => STATE] Ready=${ready} partition ${partition.Id}`);
   }
 
   function publishPartitionStateChanged(partition: Partition) {
@@ -205,7 +283,7 @@ export function startGateway(userConfig: RiscoConfig) {
     const ready = getPartitionReady(partition);
     rtState.partitions.set(partition.Id, { id: partition.Id, status: payload, ready });
     webHooks?.updatePartition({ id: partition.Id, status: payload, ready });
-    logger.info(`[Panel => STATE] Partition ${partition.Id} status=${payload}`);
+    gatewayLog('info', `[Panel => STATE] Partition ${partition.Id} status=${payload}`);
     publishPartitionReadyStateChange(partition);
   }
 
@@ -214,13 +292,13 @@ export function startGateway(userConfig: RiscoConfig) {
     const zoneStatus = zone.Open ? '1' : '0';
     rtState.zones.set(zone.Id, { id: zone.Id, open: zone.Open, bypass: zone.Bypass, label: zone.Label });
     webHooks?.updateZone({ id: zone.Id, open: zone.Open, bypass: zone.Bypass, label: zone.Label });
-    logger.info(`[Panel => STATE] Zone ${zone.Label} (${zone.Id}) open=${zone.Open}`);
+    gatewayLog('info', `[Panel => STATE] Zone ${zone.Label} (${zone.Id}) open=${zone.Open}`);
   }
 
   function publishZoneBypassStateChange(zone: Zone) {
     rtState.zones.set(zone.Id, { id: zone.Id, open: zone.Open, bypass: zone.Bypass, label: zone.Label });
     webHooks?.updateZone({ id: zone.Id, open: zone.Open, bypass: zone.Bypass, label: zone.Label });
-    logger.info(`[Panel => STATE] Zone ${zone.Label} (${zone.Id}) bypass=${zone.Bypass}`);
+    gatewayLog('info', `[Panel => STATE] Zone ${zone.Label} (${zone.Id}) bypass=${zone.Bypass}`);
   }
 
   function activePartitions(partitions: PartitionList): Partition[] {
@@ -232,7 +310,7 @@ export function startGateway(userConfig: RiscoConfig) {
   }
 
   function onPanelReady() {
-    logger.info(`Panel communications are ready`);
+    gatewayLog('info', `Panel communications are ready`);
     ensureWebStarted();
 
     // initial state to web/modbus
@@ -245,11 +323,11 @@ export function startGateway(userConfig: RiscoConfig) {
     }
 
     if (!listenerInstalled) {
-      logger.info(`Subscribing to panel partitions events`);
+      gatewayLog('info', `Subscribing to panel partitions events`);
       (panel.partitions as any).on?.('PStatusChanged', (Id, EventStr) => {
         const p = panel.partitions.byId(Id);
         const safePartition = p ? { Id: p.Id, Status: p.Status, Ready: p.Ready } : { Id };
-        logger.debug(`[Panel Event] Partition ${Id} => ${EventStr} state=${JSON.stringify(safePartition)}`);
+        gatewayLog('debug', `[Panel Event] Partition ${Id} => ${EventStr} state=${JSON.stringify(safePartition)}`);
         if (['Armed', 'Disarmed', 'HomeStay', 'HomeDisarmed', 'Alarm', 'StandBy'].includes(EventStr)) {
           publishPartitionStateChanged(panel.partitions.byId(Id));
         }
@@ -258,11 +336,11 @@ export function startGateway(userConfig: RiscoConfig) {
         }
       });
 
-      logger.info(`Subscribing to panel zones events`);
+      gatewayLog('info', `Subscribing to panel zones events`);
       (panel.zones as any).on?.('ZStatusChanged', (Id, EventStr) => {
         const z = panel.zones.byId(Id);
         const safeZone = z ? { Id: z.Id, Status: z.Status, Open: z.Open, Bypassed: (z as any).Bypassed ?? z.Bypass } : { Id };
-        logger.debug(`[Panel Event] Zone ${Id} => ${EventStr} state=${JSON.stringify(safeZone)}`);
+        gatewayLog('debug', `[Panel Event] Zone ${Id} => ${EventStr} state=${JSON.stringify(safeZone)}`);
         if (['Closed', 'Open'].includes(EventStr)) {
           publishZoneStateChange(panel.zones.byId(Id), false);
         }
@@ -273,10 +351,10 @@ export function startGateway(userConfig: RiscoConfig) {
 
       listenerInstalled = true;
     } else {
-      logger.info('Listeners already installed, skipping listeners registration');
+      gatewayLog('info', 'Listeners already installed, skipping listeners registration');
     }
 
-    logger.info(`Initialization completed`);
+    gatewayLog('info', `Initialization completed`);
     webHooks?.updatePanelStatus(true);
   }
 

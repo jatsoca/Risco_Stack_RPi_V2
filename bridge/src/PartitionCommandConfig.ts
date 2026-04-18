@@ -1,17 +1,5 @@
 export const PARTITION_COMMAND_STRATEGIES = [
-  'equals_star_decimal',
-  'colon_decimal',
-  'colon_zero_pad_3',
-  'equals_zero_pad_3',
-  'equals_hex',
-  'equals_hex_zero_pad_2',
   'p_suffix_equals_plain',
-  'p_suffix_colon_decimal',
-  'p_suffix_colon_zero_pad_3',
-  'p_suffix_equals_zero_pad_3',
-  'p_suffix_equals_hex',
-  'p_suffix_equals_hex_zero_pad_2',
-  'equals_plain',
 ] as const;
 
 export type PartitionCommandStrategy = typeof PARTITION_COMMAND_STRATEGIES[number];
@@ -33,19 +21,9 @@ export interface PartitionCommandConfig {
 
 export type PartitionCommandVerb = 'ARM' | 'STAY' | 'DISARM';
 
-export const DEFAULT_PARTITION_COMMAND_STRATEGY: PartitionCommandStrategy = 'equals_star_decimal';
+export const DEFAULT_PARTITION_COMMAND_STRATEGY: PartitionCommandStrategy = 'p_suffix_equals_plain';
 export const DEFAULT_PARTITION_COMMAND_PROBE_ORDER: PartitionCommandStrategy[] = [
-  'equals_star_decimal',
-  'colon_decimal',
-  'colon_zero_pad_3',
-  'equals_zero_pad_3',
-  'equals_hex_zero_pad_2',
   'p_suffix_equals_plain',
-  'p_suffix_equals_zero_pad_3',
-  'p_suffix_colon_decimal',
-  'p_suffix_colon_zero_pad_3',
-  'p_suffix_equals_hex_zero_pad_2',
-  'equals_plain',
 ];
 
 const strategySet = new Set<string>(PARTITION_COMMAND_STRATEGIES);
@@ -95,53 +73,15 @@ export const buildPartitionCommandFromStrategy = (
   partitionId: number,
   strategy: PartitionCommandStrategy,
 ): string => {
-  const commandToken = (() => {
-    switch (strategy) {
-      case 'p_suffix_equals_plain':
-      case 'p_suffix_colon_decimal':
-      case 'p_suffix_colon_zero_pad_3':
-      case 'p_suffix_equals_zero_pad_3':
-      case 'p_suffix_equals_hex':
-      case 'p_suffix_equals_hex_zero_pad_2':
-        if (command === 'ARM') return 'ARMP';
-        if (command === 'DISARM') return 'DISARMP';
-        return command;
-      default:
-        return command;
-    }
-  })();
-
+  const commandToken = command === 'ARM'
+    ? 'ARMP'
+    : command === 'DISARM'
+      ? 'DISARMP'
+      : command;
   const decimal = `${partitionId}`;
-  const decimalPadded3 = decimal.padStart(3, '0');
-  const hex = partitionId.toString(16).toUpperCase();
-  const hexPadded2 = hex.padStart(2, '0');
 
   switch (strategy) {
-    case 'equals_star_decimal':
-      return `${commandToken}=*${decimal}`;
-    case 'colon_decimal':
-      return `${commandToken}:${decimal}`;
-    case 'colon_zero_pad_3':
-      return `${commandToken}:${decimalPadded3}`;
-    case 'equals_zero_pad_3':
-      return `${commandToken}=${decimalPadded3}`;
-    case 'equals_hex':
-      return `${commandToken}=${hex}`;
-    case 'equals_hex_zero_pad_2':
-      return `${commandToken}=${hexPadded2}`;
     case 'p_suffix_equals_plain':
-      return `${commandToken}=${decimal}`;
-    case 'p_suffix_colon_decimal':
-      return `${commandToken}:${decimal}`;
-    case 'p_suffix_colon_zero_pad_3':
-      return `${commandToken}:${decimalPadded3}`;
-    case 'p_suffix_equals_zero_pad_3':
-      return `${commandToken}=${decimalPadded3}`;
-    case 'p_suffix_equals_hex':
-      return `${commandToken}=${hex}`;
-    case 'p_suffix_equals_hex_zero_pad_2':
-      return `${commandToken}=${hexPadded2}`;
-    case 'equals_plain':
     default:
       return `${commandToken}=${decimal}`;
   }

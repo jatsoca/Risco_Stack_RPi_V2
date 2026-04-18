@@ -16,6 +16,10 @@
       <img src="img/risco-logo.png" alt="Risco" class="logo-risco">
     </div>
     <nav class="nav-actions">
+      <a href="/diagnostics" class="btn-link">Diagn&oacute;stico</a>
+      <a href="/modbus" class="btn-link">Modbus</a>
+      <a href="/bacnet" class="btn-link">BACnet</a>
+      <a href="/debug" class="btn-link">Debug</a>
       <a href="/" class="btn-link">Dashboard</a>
       <button id="logout-btn" class="ghost">Salir</button>
     </nav>
@@ -23,7 +27,7 @@
 
   <div class="page">
     <div class="card">
-      <h2>Runtime</h2>
+      <h2>Runtime del Gateway</h2>
       <p class="muted" id="platform-msg">Cargando informaci&oacute;n del runtime...</p>
       <p class="muted" id="service-msg"></p>
     </div>
@@ -49,39 +53,45 @@
             <input id="panelId" name="panelId" required>
           </div>
           <div class="field">
-            <label for="partitionCommandMode">Modo comando partici&oacute;n</label>
-            <select id="partitionCommandMode" name="partitionCommandMode">
-              <option value="fixed">fixed</option>
-              <option value="probe">probe</option>
+            <label for="socketMode">Modo de conexi&oacute;n</label>
+            <select id="socketMode" name="socketMode">
+              <option value="direct">direct</option>
+              <option value="proxy">proxy</option>
             </select>
           </div>
           <div class="field">
-            <label for="partitionCommandStrategy">Estrategia fija</label>
+            <label for="watchDogInterval">Watchdog ms</label>
+            <input id="watchDogInterval" name="watchDogInterval" type="number" min="1000">
+          </div>
+          <div class="field">
+            <label for="commandsLog">Log de comandos</label>
+            <input id="commandsLog" name="commandsLog" type="checkbox">
+          </div>
+          <div class="field">
+            <label for="partitionCommandMode">Modo comando partici&oacute;n</label>
+            <select id="partitionCommandMode" name="partitionCommandMode">
+              <option value="fixed">fixed</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="partitionCommandStrategy">Estrategia de producci&oacute;n</label>
             <select id="partitionCommandStrategy" name="partitionCommandStrategy">
-              <option value="equals_star_decimal">equals_star_decimal</option>
-              <option value="colon_decimal">colon_decimal</option>
-              <option value="colon_zero_pad_3">colon_zero_pad_3</option>
-              <option value="equals_zero_pad_3">equals_zero_pad_3</option>
-              <option value="equals_hex">equals_hex</option>
-              <option value="equals_hex_zero_pad_2">equals_hex_zero_pad_2</option>
               <option value="p_suffix_equals_plain">p_suffix_equals_plain</option>
-              <option value="p_suffix_colon_decimal">p_suffix_colon_decimal</option>
-              <option value="p_suffix_colon_zero_pad_3">p_suffix_colon_zero_pad_3</option>
-              <option value="p_suffix_equals_zero_pad_3">p_suffix_equals_zero_pad_3</option>
-              <option value="p_suffix_equals_hex">p_suffix_equals_hex</option>
-              <option value="p_suffix_equals_hex_zero_pad_2">p_suffix_equals_hex_zero_pad_2</option>
-              <option value="equals_plain">equals_plain</option>
             </select>
           </div>
           <div class="field">
             <label for="partitionCommandProbeOrder">Orden probe</label>
-            <input id="partitionCommandProbeOrder" name="partitionCommandProbeOrder" placeholder="equals_star_decimal,colon_decimal,colon_zero_pad_3,equals_zero_pad_3,equals_hex_zero_pad_2,p_suffix_equals_plain,p_suffix_equals_zero_pad_3,p_suffix_colon_decimal,p_suffix_colon_zero_pad_3,p_suffix_equals_hex_zero_pad_2,equals_plain">
+            <input id="partitionCommandProbeOrder" name="partitionCommandProbeOrder" placeholder="p_suffix_equals_plain">
           </div>
         </div>
-        <p class="muted">Para particiones de dos d&iacute;gitos puedes fijar una sola estrategia o probar varias. Las variantes `p_suffix_*` prueban comandos tipo `ARMP` o `DISARMP`; `equals_plain` queda al final porque es la forma m&aacute;s ambigua.</p>
+        <p class="muted">Producci&oacute;n LightSYS Plus RP432MP: `p_suffix_equals_plain` env&iacute;a `ARMP=N` y `DISARMP=N`. Fue validado en panel real con particiones 12 y 14.</p>
 
         <h3>Servicios</h3>
         <div class="form-grid">
+          <div class="field">
+            <label for="webEnable">Habilitar Web</label>
+            <input id="webEnable" name="webEnable" type="checkbox">
+          </div>
           <div class="field">
             <label for="webPort">Web HTTP port</label>
             <input id="webPort" name="webPort" type="number" min="1" max="65535">
@@ -91,12 +101,20 @@
             <input id="wsPath" name="wsPath">
           </div>
           <div class="field">
+            <label for="modbusEnable">Habilitar Modbus</label>
+            <input id="modbusEnable" name="modbusEnable" type="checkbox">
+          </div>
+          <div class="field">
             <label for="modbusHost">Modbus host</label>
             <input id="modbusHost" name="modbusHost">
           </div>
           <div class="field">
             <label for="modbusPort">Modbus port</label>
             <input id="modbusPort" name="modbusPort" type="number" min="1" max="65535">
+          </div>
+          <div class="field">
+            <label>BACnet/IP</label>
+            <a href="/bacnet" class="btn-link">Configurar BACnet</a>
           </div>
           <div class="field">
             <label for="logLevel">Nivel de log</label>
@@ -118,8 +136,12 @@
           </div>
         </div>
 
-        <h3>IP del Gateway (Raspberry)</h3>
+        <h3>Red del host Raspberry Pi</h3>
         <div class="form-grid">
+          <div class="field">
+            <label for="hostInterfaceAlias">Interfaz</label>
+            <input id="hostInterfaceAlias" name="hostInterfaceAlias" placeholder="eth0">
+          </div>
           <div class="field">
             <label for="hostIp">Nueva IP</label>
             <input id="hostIp" name="hostIp" placeholder="192.168.1.50">

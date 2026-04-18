@@ -14,7 +14,7 @@ let snapshot = { partitions: [], zones: [] };
 let ws;
 let panelOnline = false;
 let reconnectTimer = null;
-let reconnectDelayMs = 1500;
+let reconnectDelayMs = 2000;
 
 function setBadge(el, text, cls) {
   if (!el) return;
@@ -27,13 +27,15 @@ function isWsReady() {
 }
 
 function updateControlsState() {
-  const ready = isWsReady() && panelOnline;
+  const enabled = isWsReady() && panelOnline;
+  if (partitionInput) {
+    partitionInput.disabled = !enabled;
+  }
   armButtons.forEach((btn) => {
-    btn.disabled = !ready;
+    btn.disabled = !enabled;
   });
-  const zoneButtons = document.querySelectorAll('.zone-bypass-btn');
-  zoneButtons.forEach((btn) => {
-    btn.disabled = !ready;
+  document.querySelectorAll('.zone-bypass-btn').forEach((btn) => {
+    btn.disabled = !enabled;
   });
 }
 
@@ -70,45 +72,71 @@ async function loadSystemInfo() {
       handleUnauthorized(res.status);
       return;
     }
-    if (!res.ok) throw new Error('system info failed');
+    if (!res.ok) throw new Error('system_info_failed');
     const data = await res.json();
     const info = data.info || {};
     if (gatewayMeta) {
-      const hostIpState = info.hostIpSupported ? 'IP host: disponible' : 'IP host: no disponible';
-      gatewayMeta.textContent = `Version ${info.appVersion || '?'} | Node ${info.nodeVersion || '?'} | ${hostIpState} | Uptime ${info.uptimeSeconds || 0}s`;
+      const hostIpState = info.hostIpSupported ? 'IP host disponible' : 'IP host no disponible';
+      gatewayMeta.textContent =
+        `Version ${info.appVersion || 'unknown'} | ${info.platform || 'unknown'} | ${info.nodeVersion || 'node'} | ` +
+        `modo ${info.serviceMode || 'standalone'} | uptime ${Math.floor(info.uptimeSeconds || 0)} s | ${hostIpState}`;
     }
   } catch (e) {
     console.error('[UI] Error loading system info', e);
-    if (gatewayMeta) gatewayMeta.textContent = 'No se pudo cargar el diagnostico del gateway';
+    if (gatewayMeta) gatewayMeta.textContent = 'No se pudo obtener diagnostico del runtime.';
   }
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    connectWS();
+  }, reconnectDelayMs);
+  reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10000);
+}
+
 function connectWS() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}${window.WS_PATH || '/ws'}`;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${location.host}${window.WS_PATH || '/ws'}`;
   ws = new WebSocket(wsUrl);
+  updateControlsState();
+
   ws.onopen = () => {
-    reconnectDelayMs = 1500;
+    reconnectDelayMs = 2000;
     setBadge(wsStatusEl, 'WS conectado', 'badge ok');
     updateControlsState();
   };
+
   ws.onclose = (ev) => {
     setBadge(wsStatusEl, 'WS desconectado', 'badge bad');
     updateControlsState();
-    if (ev.code === 1008) handleUnauthorized(401);
-    if (ev.code !== 1008) scheduleReconnect();
+    if (ev.code === 1008) {
+      handleUnauthorized(401);
+      return;
+    }
+    scheduleReconnect();
   };
+
   ws.onerror = (ev) => {
     console.error('[UI] WS error', ev);
     setBadge(wsStatusEl, 'WS error', 'badge bad');
     updateControlsState();
   };
+
   ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch (error) {
+      console.error('[UI] Invalid WS payload', error);
+      return;
+    }
+
     if (msg.type === 'snapshot') {
       panelOnline = !!msg.panelOnline;
       snapshot.partitions = msg.partitions;
@@ -125,7 +153,6 @@ function connectWS() {
     } else if (msg.type === 'panel') {
       panelOnline = !!msg.online;
       renderPanelStatus();
-      updateControlsState();
     } else if (msg.type === 'ack') {
       const ok = !!msg.ok;
       const msgText = msg.message || (ok ? 'Accion ejecutada' : 'Accion rechazada');
@@ -133,16 +160,6 @@ function connectWS() {
       showToast(`${title}: ${msgText}`, ok ? 'ok' : 'bad');
     }
   };
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  setBadge(wsStatusEl, `WS reconectando en ${Math.round(reconnectDelayMs / 1000)}s`, 'badge warn');
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectWS();
-  }, reconnectDelayMs);
-  reconnectDelayMs = Math.min(reconnectDelayMs * 2, 10000);
 }
 
 function upsert(arr, item, key) {
@@ -232,7 +249,9 @@ if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-    } catch (_) { /* ignore */ }
+    } catch (_) {
+      // ignore
+    }
     window.location.href = '/login';
   });
 }
@@ -257,4 +276,3 @@ function showToast(text, variant = 'ok') {
     setTimeout(() => el.remove(), 300);
   }, 2500);
 }
-

@@ -58,6 +58,10 @@ export class RiscoComm extends TypedEmitter<RiscoCommEvents> {
   private watchDogTimer: NodeJS.Timeout | undefined;
   private commandsStream: WriteStream | undefined;
 
+  private static buildSafeTimestamp(): string {
+    return new Date().toISOString().replace(/[:]/g, '-');
+  }
+
   constructor(options: PanelOptions) {
     super();
 
@@ -88,15 +92,9 @@ export class RiscoComm extends TypedEmitter<RiscoCommEvents> {
       'info',
       `Partition command mode=${this.partitionCommandConfig.mode}, strategy=${this.partitionCommandConfig.strategy}, probeOrder=${this.partitionCommandConfig.probeOrder.join(',')}`,
     );
-    if (this.partitionCommandConfig.probeOrder.includes('equals_plain')) {
-      logger.log(
-        'warn',
-        `Partition command probe order includes 'equals_plain'. For partitions 10+, this variant can be ambiguous on some panels.`,
-      );
-    }
 
     if (options.commandsLog) {
-      const commandsFileName = `risco-commands-${new Date().toISOString()}.csv`;
+      const commandsFileName = `risco-commands-${RiscoComm.buildSafeTimestamp()}.csv`;
       logger.log('info', `Logging commands to ${commandsFileName}`);
       this.commandsStream = fs.createWriteStream(commandsFileName, { flags: 'a' });
     }
@@ -112,6 +110,11 @@ export class RiscoComm extends TypedEmitter<RiscoCommEvents> {
 
   getPartitionCommandConfig(): PartitionCommandConfig {
     return this.partitionCommandConfig;
+  }
+
+  async sendRawCommand(command: string): Promise<string> {
+    assertIsDefined(this.tcpSocket, 'tcpSocket');
+    return this.tcpSocket.sendCommand(command);
   }
 
   private static getGmtTimeZone(): string {
@@ -561,9 +564,8 @@ export class RiscoComm extends TypedEmitter<RiscoCommEvents> {
     const ZGroups = await this.tcpSocket.getResult(`ZAREA&*${id}?`);
     const ZLabels = await this.tcpSocket.getResult(`ZLBL*${id}?`);
     const ZStatus = await this.tcpSocket.getResult(`ZSTT*${id}?`);
-    let ZTechno = await this.tcpSocket.getResult(`ZLNKTYP${id}?`);
-
-    const ZType = parseInt(await this.tcpSocket.getResult(`ZTYPE*${id}?`), 10);
+    const ZTechno = await this.tcpSocket.getResult(`ZLNKTYP${id}?`);
+    const ZType = parseInt(ZTypeStr, 10);
 
     const Item = zones.byId(id);
     Item.Label = ZLabels.trim();

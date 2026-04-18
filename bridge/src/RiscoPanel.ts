@@ -3,10 +3,16 @@ import { logger, RiscoLogger } from './Logger';
 import { Zone, ZoneList } from './Devices/Zones';
 import { OutputList } from './Devices/Outputs';
 import { PartitionList } from './Devices/Partitions';
+import { PartitionCommandExecutionResult } from './Devices/Partitions';
 import { MBSystem } from './Devices/System';
 import { EventEmitter } from 'events';
 import { SocketMode } from './RiscoBaseSocket';
-import { PartitionCommandOptions } from './PartitionCommandConfig';
+import {
+  PARTITION_COMMAND_STRATEGIES,
+  PartitionCommandOptions,
+  PartitionCommandStrategy,
+  PartitionCommandVerb,
+} from './PartitionCommandConfig';
 
 export interface PanelOptions extends PartitionCommandOptions {
   panelIp?: string
@@ -242,6 +248,69 @@ export class RiscoPanel extends EventEmitter {
       logger.log('error', `Failed to disarm the Partition ${id}: ${err}`);
       throw err;
     }
+  }
+
+  private getPartitionCommandVerb(mode: 'away' | 'home' | 'disarm'): PartitionCommandVerb {
+    switch (mode) {
+      case 'away':
+        return 'ARM';
+      case 'home':
+        return 'STAY';
+      case 'disarm':
+      default:
+        return 'DISARM';
+    }
+  }
+
+  previewPartitionCommands(
+    id: number,
+    mode: 'away' | 'home' | 'disarm',
+    strategies?: PartitionCommandStrategy[],
+  ) {
+    if ((id > this.partitions.values.length) || (id < 0)) {
+      logger.log('warn', `Failed to preview partition command ${id} : invalid partition id`);
+      return [];
+    }
+    return this.partitions.byId(id).previewPartitionCommandAttempts(
+      this.getPartitionCommandVerb(mode),
+      strategies,
+    );
+  }
+
+  getAvailablePartitionCommandStrategies(): PartitionCommandStrategy[] {
+    return [...PARTITION_COMMAND_STRATEGIES];
+  }
+
+  async debugPartitionCommand(
+    id: number,
+    mode: 'away' | 'home' | 'disarm',
+    strategy?: PartitionCommandStrategy,
+  ): Promise<PartitionCommandExecutionResult> {
+    if ((id > this.partitions.values.length) || (id < 0)) {
+      throw new Error(`Invalid partition id ${id}`);
+    }
+    return this.partitions.byId(id).debugPartitionCommand(
+      this.getPartitionCommandVerb(mode),
+      strategy ? [strategy] : undefined,
+    );
+  }
+
+  async debugRawPartitionCommand(
+    id: number,
+    mode: 'away' | 'home' | 'disarm',
+    rawCommand: string,
+  ): Promise<PartitionCommandExecutionResult> {
+    if ((id > this.partitions.values.length) || (id < 0)) {
+      throw new Error(`Invalid partition id ${id}`);
+    }
+    return this.partitions.byId(id).debugRawPartitionCommand(
+      this.getPartitionCommandVerb(mode),
+      rawCommand,
+    );
+  }
+
+  async sendRawCommand(command: string): Promise<string> {
+    return this.riscoComm.sendRawCommand(command);
   }
 
   /**

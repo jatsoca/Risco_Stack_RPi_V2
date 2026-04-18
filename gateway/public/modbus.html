@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Modbus TCP Risco Gateway</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><h1>Modbus TCP</h1></div>
+    <nav class="nav-actions">
+      <a href="/" class="btn-link">Dashboard</a>
+      <a href="/diagnostics" class="btn-link">Diagn&oacute;stico</a>
+      <a href="/bacnet" class="btn-link">BACnet</a>
+      <a href="/config" class="btn-link">Config</a>
+      <button id="logout-btn" class="ghost">Salir</button>
+    </nav>
+  </header>
+  <div class="page">
+    <div class="card">
+      <h2>Estado del Servicio</h2>
+      <p id="modbus-status" class="muted">Cargando...</p>
+    </div>
+    <div class="card">
+      <h2>Mapa de Registros</h2>
+      <table id="modbus-map"><thead><tr><th>Tipo</th><th>Rango</th><th>Valores</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="debug-grid">
+      <div class="card">
+        <h2>Particiones</h2>
+        <table id="modbus-partitions"><thead><tr><th>Reg</th><th>ID</th><th>Valor</th><th>Estado</th><th>Ready</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h2>Zonas</h2>
+        <div class="controls"><input id="zone-filter" placeholder="Filtrar zona..."></div>
+        <table id="modbus-zones"><thead><tr><th>Reg</th><th>ID</th><th>Valor</th><th>Abierta</th><th>Bypass</th><th>Etiqueta</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+  <script src="modbus.js"></script>
+</body>
+</html>

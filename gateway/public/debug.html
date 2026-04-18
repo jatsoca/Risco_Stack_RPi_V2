@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Debug Risco Gateway</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>Debug Gateway</h1>
+      <div id="connection">
+        <span id="debug-ws-status" class="badge gray">WS desconectado</span>
+        <span id="debug-panel-status" class="badge gray">Panel ?</span>
+      </div>
+    </div>
+    <div class="branding">
+      <img src="img/mainting-logo.png" alt="Mainting" class="logo-mainting">
+      <img src="img/risco-logo.png" alt="Risco" class="logo-risco">
+    </div>
+    <nav class="nav-actions">
+      <a href="/" class="btn-link">Dashboard</a>
+      <a href="/diagnostics" class="btn-link">Diagn&oacute;stico</a>
+      <a href="/modbus" class="btn-link">Modbus</a>
+      <a href="/bacnet" class="btn-link">BACnet</a>
+      <a href="/config" class="btn-link">Configuraci&oacute;n</a>
+      <button id="debug-logout-btn" class="ghost">Salir</button>
+    </nav>
+  </header>
+
+  <div class="page">
+    <div class="card">
+      <h2>Diagn&oacute;stico</h2>
+      <p id="debug-meta" class="muted">Cargando runtime...</p>
+      <p id="debug-config-meta" class="muted">Cargando estrategia actual...</p>
+    </div>
+
+    <div class="card">
+      <h2>Prueba de Comandos de Partici&oacute;n</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label for="debug-partition-id">Partici&oacute;n</label>
+          <input id="debug-partition-id" type="number" min="1" max="32" value="10">
+        </div>
+        <div class="field">
+          <label for="debug-mode">Acci&oacute;n</label>
+          <select id="debug-mode">
+            <option value="away">Armar total</option>
+            <option value="home">Armar parcial</option>
+            <option value="disarm">Desarmar</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="debug-strategy">Estrategia</label>
+          <select id="debug-strategy">
+            <option value="">current_config</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="debug-raw-command">Trama manual</label>
+          <input id="debug-raw-command" placeholder="Ej: ARM:012 o DISARM=*12">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="preview-command-btn" type="button">Vista previa</button>
+        <button id="test-strategy-btn" type="button">Probar estrategia</button>
+        <button id="test-raw-btn" type="button" class="ghost">Enviar manual</button>
+      </div>
+      <p id="debug-action-msg" class="muted"></p>
+
+      <div class="debug-grid">
+        <div class="debug-box">
+          <h3>Vista Previa</h3>
+          <table id="preview-table">
+            <thead>
+              <tr><th>Estrategia</th><th>Trama</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="debug-box">
+          <h3>Resultado</h3>
+          <div id="debug-result-summary" class="muted">Sin pruebas ejecutadas.</div>
+          <table id="result-table">
+            <thead>
+              <tr><th>Estrategia</th><th>Trama</th><th>Respuesta</th><th>Estado</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Log en Vivo</h2>
+      <div class="controls">
+        <input id="log-filter" type="text" placeholder="Filtrar por texto, nivel o fuente...">
+        <label class="inline-check">
+          <input id="log-autoscroll" type="checkbox" checked>
+          Auto-scroll
+        </label>
+        <button id="clear-log-view" type="button" class="ghost">Limpiar vista</button>
+      </div>
+      <div id="log-stream" class="log-stream"></div>
+    </div>
+  </div>
+
+  <script src="debug.js"></script>
+</body>
+</html>

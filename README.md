@@ -1,6 +1,6 @@
 # Risco_Stack_RPi_V2
 
-Gateway Web + Modbus TCP/IP para paneles de intrusion RISCO, orientado a Raspberry Pi 5.
+Gateway Web + Modbus TCP/IP + BACnet/IP para paneles de intrusion RISCO, orientado a Raspberry Pi 5.
 
 Proyecto independiente para Raspberry Pi 5. Su objetivo es operar como gateway estable entre paneles RISCO, la interfaz web y clientes Modbus TCP.
 
@@ -9,8 +9,10 @@ Mantiene la logica y el objetivo operativo del gateway:
 - dashboard web
 - menu de configuracion
 - servidor Modbus TCP
+- servidor BACnet/IP opcional para BMS
 - login web y gestion de usuarios
-- soporte experimental para particiones de dos digitos
+- soporte validado para particiones de dos digitos
+- paginas de diagnostico, mapa Modbus, mapa BACnet y debug
 
 No usa Docker. El flujo recomendado es desarrollar en Windows con VS Code y desplegar/actualizar en Raspberry Pi mediante GitHub.
 
@@ -42,6 +44,8 @@ Aplicacion principal:
 - pagina de configuracion
 - dashboard en tiempo real
 - servidor Modbus TCP
+- servidor BACnet/IP opcional
+- paginas de diagnostico, Modbus, BACnet y debug
 - bootstrap del runtime
 
 ### `runtime/`
@@ -55,7 +59,7 @@ Runtime persistente:
 - `scripts/set-ip-rpi.sh`: cambio de IP del Raspberry desde la web
 
 ### `deploy/systemd/`
-- `deploy/systemd/risco-stack-rpi-v2.service`: servicio para arranque automatico
+- `deploy/systemd/risco-gateway.service`: servicio para arranque automatico
 
 ## Flujo recomendado de trabajo
 
@@ -157,8 +161,13 @@ En el primer arranque:
 
 - web: `http://IP_DEL_RPI:1001`
 - config: `http://IP_DEL_RPI:1001/config`
+- diagnostico: `http://IP_DEL_RPI:1001/diagnostics`
+- mapa Modbus: `http://IP_DEL_RPI:1001/modbus`
+- BACnet/IP: `http://IP_DEL_RPI:1001/bacnet`
+- debug: `http://IP_DEL_RPI:1001/debug`
 - health: `http://IP_DEL_RPI:1001/health`
 - Modbus TCP: puerto `502`
+- BACnet/IP: puerto UDP `47808` cuando esta habilitado
 
 ## Actualizacion en Raspberry Pi 5 desde GitHub
 
@@ -168,7 +177,7 @@ Cada vez que hagas cambios en Windows y los subas a GitHub:
 cd /home/pi/Risco_Stack_RPi_V2
 git pull
 ./scripts/build-rpi.sh
-sudo systemctl restart risco-stack-rpi-v2.service
+sudo systemctl restart risco-gateway.service
 ```
 
 Si aun no tienes el servicio instalado, puedes arrancar manualmente:
@@ -187,16 +196,16 @@ Este es el flujo recomendado a partir de ahora:
 ### Instalar el servicio
 
 ```bash
-sudo cp /home/pi/Risco_Stack_RPi_V2/deploy/systemd/risco-stack-rpi-v2.service /etc/systemd/system/
+sudo cp /home/pi/Risco_Stack_RPi_V2/deploy/systemd/risco-gateway.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now risco-stack-rpi-v2.service
+sudo systemctl enable --now risco-gateway.service
 ```
 
 ### Ver estado y logs
 
 ```bash
-sudo systemctl status risco-stack-rpi-v2.service
-sudo journalctl -u risco-stack-rpi-v2.service -f
+sudo systemctl status risco-gateway.service
+sudo journalctl -u risco-gateway.service -f
 ```
 
 ### Si no quieres usar root
@@ -245,40 +254,50 @@ Compatibilidad heredada:
 - `web.http_port`
 - `modbus.port`
 - `modbus.host`
+- `bacnet.enable`
+- `bacnet.port`
+- `bacnet.interface`
+- `bacnet.broadcastAddress`
+- `bacnet.deviceId`
+- `bacnet.allowWrite`
+
+## Mapas BMS
+
+Modbus TCP:
+
+- Holding registers `1-32`: particiones. Valores: `0=desarmada`, `1=armada`, `2=alarmada`, `3=ready`, `4=not ready`.
+- Holding registers `33-544`: zonas. Valores: `0=cerrada`, `1=abierta`, `2=bypass`.
+- Discrete inputs `1-32`: alarma de particion.
+- Discrete inputs `33-544`: zona abierta.
+
+BACnet/IP:
+
+- Device instance configurable, default `432001`.
+- Analog Value `1-32`: mismo valor de particiones que Modbus.
+- Analog Value `33-544`: mismo valor de zonas que Modbus.
+- Binary Value `1-32`: alarma de particion.
+- Binary Value `33-544`: zona abierta.
+- Escritura BACnet queda bloqueada por defecto. Al habilitarla, AV `1-32` acepta `0=desarmar` y `1=armar total`; AV `33-544` acepta `0=normal` y `2=bypass`.
 
 ## Particiones de dos digitos
 
-Se mantiene el ajuste experimental para particiones `10+`.
+La estrategia final de produccion para LightSYS Plus RP432MP es `p_suffix_equals_plain`.
+Esta estrategia fue validada en panel real el 2026-04-17 con las particiones 12 y 14.
 
-Estrategias disponibles:
-- `equals_star_decimal`
-- `colon_decimal`
-- `colon_zero_pad_3`
-- `equals_zero_pad_3`
-- `equals_hex`
-- `equals_hex_zero_pad_2`
-- `equals_plain`
+Tramas enviadas:
+- Armar total: `ARMP=N`
+- Desarmar: `DISARMP=N`
+- Armar parcial: `STAY=N`
 
-Modo recomendado por ahora:
+Configuracion recomendada:
 
 ```json
-"partitionCommandMode": "probe"
+"partitionCommandMode": "fixed",
+"partitionCommandStrategy": "p_suffix_equals_plain",
+"partitionCommandProbeOrder": ["p_suffix_equals_plain"]
 ```
 
-Orden default:
-
-```json
-[
-  "equals_star_decimal",
-  "colon_decimal",
-  "colon_zero_pad_3",
-  "equals_zero_pad_3",
-  "equals_hex_zero_pad_2",
-  "equals_plain"
-]
-```
-
-El gateway deja en log la estrategia y la trama exacta enviada al panel para que puedas validar cual funciona mejor.
+El gateway deja en log la trama exacta enviada al panel y la respuesta del panel cuando `panel.commandsLog` esta habilitado.
 
 ## Cambio de IP del Raspberry desde la web
 
@@ -305,10 +324,15 @@ Validado en esta sesion:
 - compilacion de `gateway`
 - arranque de prueba del gateway
 - respuesta correcta de `/health`
+- protocolo de armado/desarmado de particiones `10+` validado contra panel LightSYS Plus real desde la version Windows del mismo core
+- eliminacion de consulta duplicada `ZTYPE*ID?` en discovery de zonas
+- modulo BACnet/IP probado localmente con lectura y escritura controlada en puerto UDP alterno
+- compilacion de las nuevas paginas web de diagnostico, Modbus y BACnet
 
-No validado aqui:
-- conexion real a un panel fisico
-- escritura real Modbus con cliente externo
+Pendiente en sitio:
+- despliegue de esta version RPi V2 sobre el Raspberry Pi 5 de produccion
+- validacion final del servicio `risco-gateway.service` en el Raspberry conectado al panel
+- escritura real Modbus/BACnet con cliente BMS externo
 - ejecucion real de `systemd` en Raspberry Pi
 
 ## Resumen operativo
@@ -330,7 +354,7 @@ git push
 cd /home/pi/Risco_Stack_RPi_V2
 git pull
 ./scripts/build-rpi.sh
-sudo systemctl restart risco-stack-rpi-v2.service
+sudo systemctl restart risco-gateway.service
 ```
 
 Ese es el camino correcto para evolucionar el proyecto sin volver a copiar todo manualmente.

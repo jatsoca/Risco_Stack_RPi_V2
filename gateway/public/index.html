@@ -20,6 +20,10 @@
       <img src="img/risco-logo.png" alt="Risco" class="logo-risco">
     </div>
     <nav class="nav-actions">
+      <a href="/diagnostics" class="btn-link">Diagn&oacute;stico</a>
+      <a href="/modbus" class="btn-link">Modbus</a>
+      <a href="/bacnet" class="btn-link">BACnet</a>
+      <a href="/debug" class="btn-link">Debug</a>
       <a href="/config" class="btn-link">Configuraci&oacute;n</a>
       <button id="logout-btn" class="ghost">Salir</button>
     </nav>
@@ -30,15 +34,15 @@
       <div class="info-card">
         <h3>Estado del Gateway</h3>
         <p id="gateway-meta" class="muted">Cargando diagnostico...</p>
+        <p class="muted">Los botones se bloquean cuando el panel o el WebSocket no estan disponibles.</p>
       </div>
       <div class="info-card">
-      <h3>Modbus TCP</h3>
-      <p>Holding registers (read-only):</p>
-      <ul>
-        <li>Particiones regs 1-32 (uint16). 0=disarmed, 1=armed (away), 2=triggered, 3=Ready, 4=NotReady.</li>
-        <li>Zonas regs 33-544 (uint16). 0=cerrada, 1=abierta, 2=bypass.</li>
-        <li>Discrete inputs: bits 0-31 alarmada (1), bits 32-543 zona abierta (1).</li>
-      </ul>
+        <h3>Publicaci&oacute;n BMS</h3>
+        <p class="muted">Modbus TCP y BACnet/IP tienen p&aacute;ginas dedicadas con mapa de puntos, registros y estado de servicio.</p>
+        <div class="actions compact-actions">
+          <a href="/modbus" class="btn-link">Ver Modbus</a>
+          <a href="/bacnet" class="btn-link">Ver BACnet</a>
+        </div>
       </div>
     </div>
   </div>
